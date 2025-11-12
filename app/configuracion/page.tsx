@@ -6,15 +6,50 @@ import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Brain, Key, FolderOpen, Palette, Save } from "lucide-react"
+import { Brain, Key, FolderOpen, Palette, Save, RotateCcw } from "lucide-react"
 import { useState } from "react"
+import { useConfig } from "@/contexts/config-context"
+import { useToast } from "@/hooks/use-toast"
 
 export default function ConfiguracionPage() {
+  const { config, updateConfig, resetConfig } = useConfig()
+  const { toast } = useToast()
   const [saved, setSaved] = useState(false)
 
   const handleSave = () => {
     setSaved(true)
+    toast({
+      title: "Configuración Guardada",
+      description: "Los cambios se han aplicado correctamente"
+    })
     setTimeout(() => setSaved(false), 2000)
+  }
+
+  const handleReset = () => {
+    if (confirm("¿Estás seguro de que quieres restablecer toda la configuración a los valores predeterminados?")) {
+      resetConfig()
+      toast({
+        title: "Configuración Restablecida",
+        description: "Se han restaurado los valores predeterminados"
+      })
+    }
+  }
+
+  const handlePathChange = (type: "datasets" | "models" | "reports") => {
+    // En un entorno de producción, esto abriría un diálogo de selección de carpeta
+    const newPath = prompt(`Introduce la nueva ruta para ${type}:`, config.paths[type])
+    if (newPath) {
+      updateConfig({
+        paths: {
+          ...config.paths,
+          [type]: newPath
+        }
+      })
+      toast({
+        title: "Ruta Actualizada",
+        description: `Ruta de ${type} actualizada correctamente`
+      })
+    }
   }
 
   return (
@@ -27,10 +62,16 @@ export default function ConfiguracionPage() {
             <h1 className="text-xl font-semibold">Configuración</h1>
             <p className="text-sm text-muted-foreground">Ajusta los parámetros del sistema</p>
           </div>
-          <Button size="sm" onClick={handleSave}>
-            <Save className="mr-2 h-4 w-4" />
-            {saved ? "Guardado ✓" : "Guardar Cambios"}
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleReset}>
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Restablecer
+            </Button>
+            <Button size="sm" onClick={handleSave}>
+              <Save className="mr-2 h-4 w-4" />
+              {saved ? "Guardado ✓" : "Guardar Cambios"}
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-6 p-8">
@@ -45,7 +86,12 @@ export default function ConfiguracionPage() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="model-select">Modelo YOLO Activo</Label>
-                  <Select defaultValue="yolov8n">
+                  <Select
+                    value={config.model.activeModel}
+                    onValueChange={(value) => updateConfig({
+                      model: { ...config.model, activeModel: value as any }
+                    })}
+                  >
                     <SelectTrigger id="model-select">
                       <SelectValue />
                     </SelectTrigger>
@@ -62,22 +108,51 @@ export default function ConfiguracionPage() {
                   <div className="space-y-2">
                     <Label htmlFor="confidence">Umbral de Confianza</Label>
                     <div className="flex items-center gap-2">
-                      <Input id="confidence" type="number" min="0" max="1" step="0.05" defaultValue="0.5" />
-                      <span className="text-sm text-muted-foreground">50%</span>
+                      <Input
+                        id="confidence"
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={config.model.confidenceThreshold}
+                        onChange={(e) => updateConfig({
+                          model: { ...config.model, confidenceThreshold: parseFloat(e.target.value) }
+                        })}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {Math.round(config.model.confidenceThreshold * 100)}%
+                      </span>
                     </div>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="iou">Umbral IoU (NMS)</Label>
                     <div className="flex items-center gap-2">
-                      <Input id="iou" type="number" min="0" max="1" step="0.05" defaultValue="0.45" />
-                      <span className="text-sm text-muted-foreground">45%</span>
+                      <Input
+                        id="iou"
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={config.model.iouThreshold}
+                        onChange={(e) => updateConfig({
+                          model: { ...config.model, iouThreshold: parseFloat(e.target.value) }
+                        })}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {Math.round(config.model.iouThreshold * 100)}%
+                      </span>
                     </div>
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="img-size">Tamaño de Imagen (px)</Label>
-                  <Select defaultValue="640">
+                  <Select
+                    value={config.model.imageSize}
+                    onValueChange={(value) => updateConfig({
+                      model: { ...config.model, imageSize: value as any }
+                    })}
+                  >
                     <SelectTrigger id="img-size">
                       <SelectValue />
                     </SelectTrigger>
@@ -90,14 +165,28 @@ export default function ConfiguracionPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <input type="checkbox" id="phash" defaultChecked />
+                  <input
+                    type="checkbox"
+                    id="phash"
+                    checked={config.model.enablePHash}
+                    onChange={(e) => updateConfig({
+                      model: { ...config.model, enablePHash: e.target.checked }
+                    })}
+                  />
                   <Label htmlFor="phash" className="cursor-pointer">
                     Activar filtro pHash (eliminar duplicados)
                   </Label>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <input type="checkbox" id="clahe" defaultChecked />
+                  <input
+                    type="checkbox"
+                    id="clahe"
+                    checked={config.model.enableCLAHE}
+                    onChange={(e) => updateConfig({
+                      model: { ...config.model, enableCLAHE: e.target.checked }
+                    })}
+                  />
                   <Label htmlFor="clahe" className="cursor-pointer">
                     Aplicar corrección CLAHE (mejorar contraste)
                   </Label>
@@ -115,13 +204,29 @@ export default function ConfiguracionPage() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="openai-key">OpenAI API Key (GPT-4)</Label>
-                  <Input id="openai-key" type="password" placeholder="sk-..." />
+                  <Input
+                    id="openai-key"
+                    type="password"
+                    placeholder="sk-..."
+                    value={config.apiKeys.openai}
+                    onChange={(e) => updateConfig({
+                      apiKeys: { ...config.apiKeys, openai: e.target.value }
+                    })}
+                  />
                   <p className="text-xs text-muted-foreground">Necesaria para generación de informes con IA</p>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="azure-key">Azure Computer Vision (Opcional)</Label>
-                  <Input id="azure-key" type="password" placeholder="Clave de Azure..." />
+                  <Input
+                    id="azure-key"
+                    type="password"
+                    placeholder="Clave de Azure..."
+                    value={config.apiKeys.azure}
+                    onChange={(e) => updateConfig({
+                      apiKeys: { ...config.apiKeys, azure: e.target.value }
+                    })}
+                  />
                 </div>
               </div>
             </Card>
@@ -137,8 +242,18 @@ export default function ConfiguracionPage() {
                 <div className="space-y-2">
                   <Label htmlFor="dataset-path">Ruta de Datasets</Label>
                   <div className="flex gap-2">
-                    <Input id="dataset-path" defaultValue="C:/IKUSKI/data/datasets" readOnly />
-                    <Button variant="outline" size="sm">
+                    <Input
+                      id="dataset-path"
+                      value={config.paths.datasets}
+                      onChange={(e) => updateConfig({
+                        paths: { ...config.paths, datasets: e.target.value }
+                      })}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePathChange("datasets")}
+                    >
                       Cambiar
                     </Button>
                   </div>
@@ -147,8 +262,18 @@ export default function ConfiguracionPage() {
                 <div className="space-y-2">
                   <Label htmlFor="models-path">Ruta de Modelos</Label>
                   <div className="flex gap-2">
-                    <Input id="models-path" defaultValue="C:/IKUSKI/data/models" readOnly />
-                    <Button variant="outline" size="sm">
+                    <Input
+                      id="models-path"
+                      value={config.paths.models}
+                      onChange={(e) => updateConfig({
+                        paths: { ...config.paths, models: e.target.value }
+                      })}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePathChange("models")}
+                    >
                       Cambiar
                     </Button>
                   </div>
@@ -157,8 +282,18 @@ export default function ConfiguracionPage() {
                 <div className="space-y-2">
                   <Label htmlFor="reports-path">Ruta de Informes</Label>
                   <div className="flex gap-2">
-                    <Input id="reports-path" defaultValue="C:/IKUSKI/reports" readOnly />
-                    <Button variant="outline" size="sm">
+                    <Input
+                      id="reports-path"
+                      value={config.paths.reports}
+                      onChange={(e) => updateConfig({
+                        paths: { ...config.paths, reports: e.target.value }
+                      })}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePathChange("reports")}
+                    >
                       Cambiar
                     </Button>
                   </div>
@@ -178,7 +313,12 @@ export default function ConfiguracionPage() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="theme">Tema</Label>
-                  <Select defaultValue="light">
+                  <Select
+                    value={config.appearance.theme}
+                    onValueChange={(value) => updateConfig({
+                      appearance: { ...config.appearance, theme: value as any }
+                    })}
+                  >
                     <SelectTrigger id="theme">
                       <SelectValue />
                     </SelectTrigger>
@@ -192,7 +332,12 @@ export default function ConfiguracionPage() {
 
                 <div className="space-y-2">
                   <Label htmlFor="language">Idioma</Label>
-                  <Select defaultValue="es">
+                  <Select
+                    value={config.appearance.language}
+                    onValueChange={(value) => updateConfig({
+                      appearance: { ...config.appearance, language: value as any }
+                    })}
+                  >
                     <SelectTrigger id="language">
                       <SelectValue />
                     </SelectTrigger>

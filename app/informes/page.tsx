@@ -5,594 +5,765 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Checkbox } from "@/components/ui/checkbox"
-import { FileText, Download, Eye, FileCheck } from "lucide-react"
-import { useState } from "react"
+import { FileText, Download, Eye, Sparkles, MapPin, Image as ImageIcon, Printer } from "lucide-react"
+import { useState, useEffect, useRef } from "react"
+import { useAnalysisState } from "@/contexts/analysis-context"
+import { useToast } from "@/hooks/use-toast"
+import { AdvancedImageViewer } from "@/components/advanced-image-viewer"
+import { extractGPSFromImage, generateSimulatedGPS } from "@/lib/exif-utils"
+import { exportToWord, printReport } from "@/lib/report-export"
+import { getLogoBase64 } from "@/lib/logo-utils"
+import { processImagesWithBoxes } from "@/lib/image-with-boxes"
+import { getStaticMapImageUrl, getStaticMapBase64, getStaticMapProxyUrl, getOpenStreetMapUrl, getGoogleMapsUrl, formatGPSCoordinates } from "@/lib/maps-utils"
 
 export default function InformesPage() {
+  const { state: { markedForReport, loadedImages, detections } } = useAnalysisState()
+  const { toast } = useToast()
+
   const [generating, setGenerating] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
+  const [generatingAI, setGeneratingAI] = useState(false)
 
-  const handleGenerate = () => {
-    setGenerating(true)
-    setTimeout(() => setGenerating(false), 3000)
+  // Cargar librería exifr para extracción de GPS
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !(window as any).exifr) {
+      const script = document.createElement('script')
+      script.src = 'https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js'
+      script.async = true
+      document.head.appendChild(script)
+
+      return () => {
+        document.head.removeChild(script)
+      }
+    }
+  }, [])
+
+  // Cargar logo en base64 al montar
+  useEffect(() => {
+    const loadLogo = async () => {
+      const logo = await getLogoBase64()
+      setLogoBase64(logo)
+    }
+    loadLogo()
+  }, [])
+
+  // Datos del proyecto
+  const [projectData, setProjectData] = useState({
+    workNumber: "",
+    orderNumber: "",
+    projectName: "",
+    installationCode: "",
+    location: "",
+    inspectionDate: new Date().toISOString().split('T')[0],
+    reportDate: new Date().toISOString().split('T')[0],
+    inspector: "",
+    reviewer: "",
+    client: ""
+  })
+
+  // Editor de análisis por imagen (contenido editable)
+  const [imageAnalysis, setImageAnalysis] = useState<{[key: string]: string}>({})
+
+  // Cache de coordenadas GPS por imagen
+  const [imageGPS, setImageGPS] = useState<{[key: string]: any}>({})
+  const [loadingGPS, setLoadingGPS] = useState(false)
+
+  // Cache de URLs de mapas (para visualización en UI)
+  const [imageMaps, setImageMaps] = useState<{[key: string]: string | null}>({})
+
+  // Logo en base64
+  const [logoBase64, setLogoBase64] = useState<string>('')
+
+  // Obtener imágenes marcadas con sus detecciones
+  const markedImages = loadedImages.filter(img => markedForReport.includes(img.id))
+
+  const getImageDetections = (imageUrl: string) => {
+    return detections.filter(d => d.image === imageUrl)
   }
 
-  const reportSections = [
-    { id: "cover", label: "Portada", checked: true },
-    { id: "index", label: "Índice", checked: true },
-    { id: "intro", label: "Introducción y Contexto", checked: true },
-    { id: "scope", label: "Alcance de la Inspección", checked: true },
-    { id: "references", label: "Referencias Normativas", checked: false },
-    { id: "methodology", label: "Metodología (Dron + IA)", checked: true },
-    { id: "technical", label: "Observaciones Técnicas", checked: true },
-    { id: "results", label: "Condición Observada / Resultados", checked: true },
-    { id: "measurements", label: "Mediciones y Datos Técnicos", checked: true },
-    { id: "severity", label: "Análisis de Severidad", checked: true },
-    { id: "photos", label: "Anexo Fotográfico", checked: true },
-    { id: "maps", label: "Vista de Ubicación (Google Maps)", checked: true },
-    { id: "conclusions", label: "Conclusiones", checked: true },
-    { id: "recommendations", label: "Recomendaciones", checked: true },
-  ]
+  // Extraer coordenadas GPS de metadatos
+  const extractGPSCoordinates = async (imageId: string, imageUrl: string, index: number) => {
+    // Si ya tenemos las coordenadas en caché, devolverlas
+    if (imageGPS[imageId]) {
+      return imageGPS[imageId]
+    }
+
+    try {
+      const gpsData = await extractGPSFromImage(imageUrl)
+
+      if (gpsData.hasGPS) {
+        const coords = {
+          latitude: gpsData.latitude!,
+          longitude: gpsData.longitude!,
+          altitude: gpsData.altitude || 0,
+          hasGPS: true
+        }
+        setImageGPS(prev => ({ ...prev, [imageId]: coords }))
+        return coords
+      } else {
+        // Si no hay GPS, generar coordenadas simuladas
+        const simulated = generateSimulatedGPS(index)
+        setImageGPS(prev => ({ ...prev, [imageId]: simulated }))
+        return simulated
+      }
+    } catch (error) {
+      console.error('Error extracting GPS:', error)
+      const simulated = generateSimulatedGPS(index)
+      setImageGPS(prev => ({ ...prev, [imageId]: simulated }))
+      return simulated
+    }
+  }
+
+  // Cargar GPS de todas las imágenes al montar
+  useEffect(() => {
+    const loadAllGPS = async () => {
+      if (markedImages.length === 0 || loadingGPS) return
+
+      setLoadingGPS(true)
+      for (let i = 0; i < markedImages.length; i++) {
+        const img = markedImages[i]
+        if (!imageGPS[img.id]) {
+          await extractGPSCoordinates(img.id, img.url, i)
+        }
+      }
+      setLoadingGPS(false)
+    }
+
+    loadAllGPS()
+  }, [markedImages.length])
+
+  // Generar URLs de mapas usando proxy después de tener las coordenadas GPS
+  useEffect(() => {
+    const generateMapUrls = () => {
+      if (markedImages.length === 0 || Object.keys(imageGPS).length === 0) return
+
+      for (const img of markedImages) {
+        const gps = imageGPS[img.id]
+        if (gps && gps.latitude && gps.longitude && !imageMaps[img.id]) {
+          // Generar URL del mapa usando proxy (evita CORS)
+          const mapProxyUrl = getStaticMapProxyUrl({
+            latitude: gps.latitude,
+            longitude: gps.longitude,
+            zoom: 17,
+            width: 600,
+            height: 400,
+            mapType: 'roadmap'
+          })
+          setImageMaps(prev => ({ ...prev, [img.id]: mapProxyUrl }))
+        }
+      }
+    }
+
+    generateMapUrls()
+  }, [imageGPS, markedImages.length])
+
+  // Generar análisis con IA
+  const generateAIAnalysis = async (imageId: string, imageDetections: any[]) => {
+    setGeneratingAI(true)
+
+    try {
+      const severityCounts = {
+        alto: imageDetections.filter(d => d.severity === "alto").length,
+        medio: imageDetections.filter(d => d.severity === "medio").length,
+        bajo: imageDetections.filter(d => d.severity === "bajo").length
+      }
+
+      const avgConfidence = imageDetections.reduce((sum, d) => sum + d.confidence, 0) / imageDetections.length
+
+      // Llamar a la API de ChatGPT
+      const response = await fetch('/api/generate-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          detections: imageDetections.length,
+          severityCounts,
+          avgConfidence
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Error al generar análisis')
+      }
+
+      const data = await response.json()
+
+      setImageAnalysis(prev => ({
+        ...prev,
+        [imageId]: data.analysis
+      }))
+
+      toast({
+        title: "Análisis Generado",
+        description: "El análisis con IA se generó correctamente"
+      })
+    } catch (error: any) {
+      console.error('Error generating AI analysis:', error)
+
+      // Fallback: generar análisis básico sin IA
+      const severityCounts = {
+        alto: imageDetections.filter(d => d.severity === "alto").length,
+        medio: imageDetections.filter(d => d.severity === "medio").length,
+        bajo: imageDetections.filter(d => d.severity === "bajo").length
+      }
+
+      let analysis = `Se detectaron ${imageDetections.length} áreas con presencia de corrosión. `
+
+      if (severityCounts.alto > 0) {
+        analysis += `Se identificaron ${severityCounts.alto} área(s) de severidad alta que requieren intervención inmediata. `
+      }
+      if (severityCounts.medio > 0) {
+        analysis += `${severityCounts.medio} área(s) presentan severidad media, recomendándose planificar mantenimiento preventivo. `
+      }
+      if (severityCounts.bajo > 0) {
+        analysis += `${severityCounts.bajo} área(s) con severidad baja están en fase inicial de corrosión. `
+      }
+
+      analysis += "Se recomienda monitoreo continuo de las áreas afectadas."
+
+      setImageAnalysis(prev => ({
+        ...prev,
+        [imageId]: analysis
+      }))
+
+      toast({
+        title: "Análisis Básico Generado",
+        description: "API de IA no disponible, se generó análisis básico",
+        variant: "default"
+      })
+    } finally {
+      setGeneratingAI(false)
+    }
+  }
+
+  // Generar todos los análisis con IA
+  const generateAllAnalyses = async () => {
+    for (const img of markedImages) {
+      const imgDetections = getImageDetections(img.url)
+      if (imgDetections.length > 0 && !imageAnalysis[img.id]) {
+        await generateAIAnalysis(img.id, imgDetections)
+      }
+    }
+  }
+
+  // Manejar cambio en el texto del análisis
+  const handleAnalysisChange = (imageId: string, content: string) => {
+    setImageAnalysis(prev => ({
+      ...prev,
+      [imageId]: content
+    }))
+  }
+
+  // Preparar datos para exportación
+  const prepareReportData = () => {
+    return {
+      projectData,
+      images: markedImages.map((img, index) => ({
+        id: img.id,
+        filename: img.filename,
+        url: img.url,
+        timestamp: img.timestamp || new Date().toLocaleString('es-ES'),
+        gps: imageGPS[img.id] || generateSimulatedGPS(index),
+        detections: getImageDetections(img.url),
+        analysis: imageAnalysis[img.id] || 'Sin análisis generado'
+      }))
+    }
+  }
+
+  // Exportar a Word
+  const handleExportWord = async () => {
+    if (markedImages.length === 0) {
+      toast({
+        title: "Sin Imágenes",
+        description: "Debes marcar al menos una imagen en Análisis para generar el informe",
+        variant: "destructive"
+      })
+      return
+    }
+
+    setGenerating(true)
+
+    try {
+      toast({
+        title: "Procesando Imágenes",
+        description: "Dibujando bounding boxes en las imágenes..."
+      })
+
+      // Procesar imágenes con bounding boxes
+      const imagesToProcess = markedImages.map(img => ({
+        url: img.url,
+        boxes: getImageDetections(img.url).map(d => ({
+          x: d.bbox.x,
+          y: d.bbox.y,
+          w: d.bbox.w,
+          h: d.bbox.h,
+          label: "Corrosión",
+          confidence: d.confidence,
+          severity: d.severity as "alto" | "medio" | "bajo"
+        }))
+      }))
+
+      const processedImagesMap = await processImagesWithBoxes(imagesToProcess)
+
+      // Convertir mapas a base64 para exportación
+      toast({
+        title: "Convirtiendo Mapas",
+        description: "Preparando imágenes de mapas para el documento..."
+      })
+
+      const imagesWithMaps = await Promise.all(
+        markedImages.map(async (img, index) => {
+          const gps = imageGPS[img.id] || generateSimulatedGPS(index)
+          let mapBase64 = null
+
+          // Convertir URL del mapa a base64 para incluir en el documento
+          if (imageMaps[img.id] && gps.latitude && gps.longitude) {
+            try {
+              mapBase64 = await getStaticMapBase64({
+                latitude: gps.latitude,
+                longitude: gps.longitude,
+                zoom: 17,
+                width: 600,
+                height: 400,
+                mapType: 'roadmap'
+              })
+            } catch (error) {
+              console.error(`Error converting map to base64 for ${img.id}:`, error)
+            }
+          }
+
+          return {
+            id: img.id,
+            filename: img.filename,
+            url: processedImagesMap.get(img.url) || img.url,
+            timestamp: img.timestamp || new Date().toLocaleString('es-ES'),
+            gps,
+            detections: getImageDetections(img.url),
+            analysis: imageAnalysis[img.id] || 'Sin análisis generado',
+            mapImageBase64: mapBase64
+          }
+        })
+      )
+
+      // Preparar datos del reporte con imágenes procesadas
+      const reportData = {
+        projectData,
+        images: imagesWithMaps
+      }
+
+      await exportToWord(reportData, logoBase64)
+
+      toast({
+        title: "Informe Exportado",
+        description: "El informe Word se ha descargado correctamente"
+      })
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "No se pudo exportar el informe",
+        variant: "destructive"
+      })
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  // Imprimir informe
+  const handlePrint = async () => {
+    if (markedImages.length === 0) {
+      toast({
+        title: "Sin Imágenes",
+        description: "Debes marcar al menos una imagen en Análisis para imprimir el informe",
+        variant: "destructive"
+      })
+      return
+    }
+
+    try {
+      toast({
+        title: "Procesando Imágenes",
+        description: "Dibujando bounding boxes en las imágenes..."
+      })
+
+      // Procesar imágenes con bounding boxes
+      const imagesToProcess = markedImages.map(img => ({
+        url: img.url,
+        boxes: getImageDetections(img.url).map(d => ({
+          x: d.bbox.x,
+          y: d.bbox.y,
+          w: d.bbox.w,
+          h: d.bbox.h,
+          label: "Corrosión",
+          confidence: d.confidence,
+          severity: d.severity as "alto" | "medio" | "bajo"
+        }))
+      }))
+
+      const processedImagesMap = await processImagesWithBoxes(imagesToProcess)
+
+      // Convertir mapas a base64 para impresión
+      toast({
+        title: "Convirtiendo Mapas",
+        description: "Preparando imágenes de mapas para imprimir..."
+      })
+
+      const imagesWithMaps = await Promise.all(
+        markedImages.map(async (img, index) => {
+          const gps = imageGPS[img.id] || generateSimulatedGPS(index)
+          let mapBase64 = null
+
+          // Convertir URL del mapa a base64 para incluir en el documento
+          if (imageMaps[img.id] && gps.latitude && gps.longitude) {
+            try {
+              mapBase64 = await getStaticMapBase64({
+                latitude: gps.latitude,
+                longitude: gps.longitude,
+                zoom: 17,
+                width: 600,
+                height: 400,
+                mapType: 'roadmap'
+              })
+            } catch (error) {
+              console.error(`Error converting map to base64 for ${img.id}:`, error)
+            }
+          }
+
+          return {
+            id: img.id,
+            filename: img.filename,
+            url: processedImagesMap.get(img.url) || img.url,
+            timestamp: img.timestamp || new Date().toLocaleString('es-ES'),
+            gps,
+            detections: getImageDetections(img.url),
+            analysis: imageAnalysis[img.id] || 'Sin análisis generado',
+            mapImageBase64: mapBase64
+          }
+        })
+      )
+
+      // Preparar datos del reporte con imágenes procesadas
+      const reportData = {
+        projectData,
+        images: imagesWithMaps
+      }
+
+      printReport(reportData, logoBase64)
+
+      toast({
+        title: "Imprimiendo",
+        description: "Se abrió el diálogo de impresión"
+      })
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "No se pudo imprimir el informe",
+        variant: "destructive"
+      })
+    }
+  }
 
   return (
     <div className="flex h-screen bg-background">
       <SidebarNav />
 
       <div className="flex-1 overflow-auto">
+        {/* Header */}
         <div className="flex h-16 items-center justify-between border-b border-border px-8">
           <div>
             <h1 className="text-xl font-semibold">Generación de Informes</h1>
-            <p className="text-sm text-muted-foreground">Informes técnicos profesionales con análisis IA</p>
+            <p className="text-sm text-muted-foreground">
+              {markedImages.length} {markedImages.length === 1 ? 'imagen seleccionada' : 'imágenes seleccionadas'}
+            </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowPreview(!showPreview)}>
-              <Eye className="mr-2 h-4 w-4" />
-              {showPreview ? "Ocultar" : "Vista Previa"}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={generateAllAnalyses}
+              disabled={generatingAI || markedImages.length === 0}
+            >
+              <Sparkles className="mr-2 h-4 w-4" />
+              {generatingAI ? "Generando..." : "Generar Análisis IA"}
             </Button>
-            <Button size="sm" onClick={handleGenerate} disabled={generating}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePrint}
+              disabled={markedImages.length === 0}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Imprimir
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleExportWord}
+              disabled={generating || markedImages.length === 0}
+            >
               <Download className="mr-2 h-4 w-4" />
-              {generating ? "Generando..." : "Generar Informe"}
+              {generating ? "Generando..." : "Exportar a Word"}
             </Button>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-6 p-8">
-          {/* Configuration Panel */}
-          <div className="space-y-6">
-            <Card className="p-6">
-              <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-                <FileText className="h-5 w-5 text-primary" />
-                Datos del Proyecto
-              </h2>
-
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="work-number">Nº de Obra</Label>
-                    <Input id="work-number" placeholder="25.00015.45.41" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="order-number">Nº de Pedido</Label>
-                    <Input id="order-number" placeholder="4508838917" />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="project-name">Nombre del Proyecto</Label>
-                  <Input id="project-name" placeholder="Inspección de estructura metálica..." />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="installation-code">Código de Instalación</Label>
-                  <Input id="installation-code" placeholder="1-1-01-VCD-050006-PES00028" />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="location">Localización</Label>
-                  <Input id="location" placeholder="Puente sobre Río, Ciudad, Provincia" />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="inspection-date">Fecha de Inspección</Label>
-                    <Input id="inspection-date" type="date" defaultValue="2025-01-15" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="report-date">Fecha del Informe</Label>
-                    <Input id="report-date" type="date" defaultValue="2025-01-20" />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="inspector">Elaborado por</Label>
-                    <Input id="inspector" placeholder="Nombre del Inspector" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="reviewer">Revisado por</Label>
-                    <Input id="reviewer" placeholder="Nombre del Revisor" />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="client">Cliente / Organización</Label>
-                  <Input id="client" placeholder="Nombre de la empresa cliente" />
+        <div className="p-8 space-y-6">
+          {/* Mensaje informativo si no hay imágenes */}
+          {markedImages.length === 0 && (
+            <Card className="p-6 border-yellow-500/50 bg-yellow-500/10">
+              <div className="flex items-start gap-3">
+                <FileText className="h-5 w-5 text-yellow-500 mt-0.5" />
+                <div>
+                  <h3 className="font-semibold text-yellow-500">No hay imágenes seleccionadas</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Puedes rellenar los datos del proyecto ahora. Para incluir imágenes en el informe,
+                    ve a la página de <a href="/analisis" className="text-primary underline">Análisis</a> y
+                    marca las imágenes usando los checkboxes.
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    <strong>Nota:</strong> Las imágenes se mantienen durante tu sesión de trabajo, pero
+                    se perderán si recargas la página. Completa el flujo de trabajo sin recargar.
+                  </p>
                 </div>
               </div>
             </Card>
+          )}
 
-            <Card className="p-6">
-              <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-                <FileCheck className="h-5 w-5 text-accent" />
-                Configuración del Informe
-              </h2>
-
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="format">Formato de Exportación</Label>
-                  <Select defaultValue="pdf">
-                    <SelectTrigger id="format">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pdf">PDF</SelectItem>
-                      <SelectItem value="docx">DOCX (Word)</SelectItem>
-                      <SelectItem value="both">PDF + DOCX</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-3">
-                  <Label>Secciones del Informe</Label>
-                  <div className="max-h-[300px] space-y-2 overflow-y-auto rounded-lg border border-border p-3">
-                    {reportSections.map((section) => (
-                      <div key={section.id} className="flex items-center space-x-2">
-                        <Checkbox id={section.id} defaultChecked={section.checked} />
-                        <label
-                          htmlFor={section.id}
-                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                        >
-                          {section.label}
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="ai-analysis">Análisis IA (GPT-4)</Label>
-                  <Select defaultValue="enabled">
-                    <SelectTrigger id="ai-analysis">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="enabled">Activado - Análisis completo</SelectItem>
-                      <SelectItem value="summary">Solo resumen ejecutivo</SelectItem>
-                      <SelectItem value="disabled">Desactivado</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="subject">Asunto de la Inspección</Label>
-                  <Textarea
-                    id="subject"
-                    placeholder="Inspección visual con registro fotográfico, medición de espesuras y evaluación de la protección anticorrosiva..."
-                    className="min-h-[60px]"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="notes">Observaciones Adicionales</Label>
-                  <Textarea
-                    id="notes"
-                    placeholder="Notas complementarias sobre la inspección..."
-                    className="min-h-[60px]"
-                  />
+          {/* Mensaje de imágenes disponibles */}
+          {markedImages.length > 0 && markedImages.some(img => !img.url) && (
+            <Card className="p-6 border-red-500/50 bg-red-500/10">
+              <div className="flex items-start gap-3">
+                <FileText className="h-5 w-5 text-red-500 mt-0.5" />
+                <div>
+                  <h3 className="font-semibold text-red-500">Algunas imágenes no están disponibles</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Las imágenes se perdieron al recargar la página. Por favor, vuelve a
+                    <a href="/analisis" className="text-primary underline ml-1">Análisis</a>,
+                    carga las imágenes de nuevo, y genera el informe sin recargar la página.
+                  </p>
                 </div>
               </div>
             </Card>
-          </div>
+          )}
 
-          {/* Preview Panel */}
-          <div className="space-y-6">
-            {showPreview ? (
-              <Card className="p-6">
-                <h2 className="mb-4 text-lg font-semibold">Vista Previa del Informe</h2>
+          {/* Datos del Proyecto */}
+          <Card className="p-6">
+            <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
+              <FileText className="h-5 w-5 text-primary" />
+              Datos del Proyecto
+            </h2>
 
-                <div className="max-h-[800px] space-y-6 overflow-y-auto rounded-lg border-2 border-border bg-white p-8 text-foreground shadow-lg">
-                  {/* Cover Page */}
-                  <div className="space-y-8 border-b-2 border-border pb-8">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="text-3xl font-bold text-primary">IKUSKI</div>
-                        <div className="text-xs text-muted-foreground">AI RUST DETECTION</div>
-                      </div>
-                      <div className="text-right text-xs text-muted-foreground">
-                        <div>Dirección de Inspección</div>
-                        <div>Enero 2025</div>
-                      </div>
-                    </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="work-number">Nº de Obra</Label>
+                <Input
+                  id="work-number"
+                  value={projectData.workNumber}
+                  onChange={(e) => setProjectData({...projectData, workNumber: e.target.value})}
+                  placeholder="25.00015.45.41"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="order-number">Nº de Pedido</Label>
+                <Input
+                  id="order-number"
+                  value={projectData.orderNumber}
+                  onChange={(e) => setProjectData({...projectData, orderNumber: e.target.value})}
+                  placeholder="4508838917"
+                />
+              </div>
+              <div className="space-y-2 col-span-2">
+                <Label htmlFor="project-name">Nombre del Proyecto</Label>
+                <Input
+                  id="project-name"
+                  value={projectData.projectName}
+                  onChange={(e) => setProjectData({...projectData, projectName: e.target.value})}
+                  placeholder="Inspección de estructura metálica..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="location">Localización</Label>
+                <Input
+                  id="location"
+                  value={projectData.location}
+                  onChange={(e) => setProjectData({...projectData, location: e.target.value})}
+                  placeholder="Ciudad, Provincia"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="client">Cliente</Label>
+                <Input
+                  id="client"
+                  value={projectData.client}
+                  onChange={(e) => setProjectData({...projectData, client: e.target.value})}
+                  placeholder="Nombre de la empresa cliente"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="inspector">Elaborado por</Label>
+                <Input
+                  id="inspector"
+                  value={projectData.inspector}
+                  onChange={(e) => setProjectData({...projectData, inspector: e.target.value})}
+                  placeholder="Nombre del Inspector"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reviewer">Revisado por</Label>
+                <Input
+                  id="reviewer"
+                  value={projectData.reviewer}
+                  onChange={(e) => setProjectData({...projectData, reviewer: e.target.value})}
+                  placeholder="Nombre del Revisor"
+                />
+              </div>
+            </div>
+          </Card>
 
-                    <div className="space-y-4 border-y border-border py-6 text-center">
-                      <h1 className="text-2xl font-bold uppercase">Relatório de Inspeção</h1>
-                      <h2 className="text-xl font-semibold text-primary">Inspection Report</h2>
-                    </div>
+          {/* Imágenes con Análisis - Solo mostrar si hay imágenes marcadas */}
+          {markedImages.length > 0 && (
+            <Card className="p-6">
+              <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
+                <ImageIcon className="h-5 w-5 text-accent" />
+                Anexo Fotográfico con Análisis
+              </h2>
 
-                    <div className="space-y-3 text-sm">
-                      <div className="grid grid-cols-[120px_1fr] gap-2">
-                        <span className="font-semibold">Cliente:</span>
-                        <span>Empresa Industrial S.A.</span>
-                      </div>
-                      <div className="grid grid-cols-[120px_1fr] gap-2">
-                        <span className="font-semibold">Obra nº:</span>
-                        <span>25.00015.45.41</span>
-                      </div>
-                      <div className="grid grid-cols-[120px_1fr] gap-2">
-                        <span className="font-semibold">Nº relatório:</span>
-                        <span>2501</span>
-                      </div>
-                      <div className="grid grid-cols-[120px_1fr] gap-2">
-                        <span className="font-semibold">Localización:</span>
-                        <span>Puente Industrial, Bilbao, País Vasco</span>
-                      </div>
-                      <div className="grid grid-cols-[120px_1fr] gap-2">
-                        <span className="font-semibold">Asunto:</span>
-                        <span>
-                          Inspección visual mediante dron con registro fotográfico y detección automática de corrosión
-                          mediante IA
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+              <div className="space-y-8">
+              {markedImages.map((img, index) => {
+                const imgDetections = getImageDetections(img.url)
+                const gps = imageGPS[img.id] || generateSimulatedGPS(index)
+                const boundingBoxes = imgDetections.map(d => ({
+                  x: d.bbox.x,
+                  y: d.bbox.y,
+                  w: d.bbox.w,
+                  h: d.bbox.h,
+                  label: "Corrosión",
+                  confidence: d.confidence,
+                  severity: d.severity as "alto" | "medio" | "bajo"
+                }))
 
-                  {/* Index */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-bold">ÍNDICE</h3>
-                    <div className="space-y-1 text-sm">
-                      <div className="flex justify-between">
-                        <span>1. Introducción</span>
-                        <span>1</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>2. Alcance de la Inspección</span>
-                        <span>1</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>3. Referencias Normativas</span>
-                        <span>2</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>4. Observaciones Complementarias</span>
-                        <span>3</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>5. Condición Observada</span>
-                        <span>4</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>6. Conclusiones</span>
-                        <span>8</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>7. Vista de Ubicación</span>
-                        <span>9</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>8. Anexo Fotográfico</span>
-                        <span>10</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Introduction */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-bold">1. Introducción</h3>
-                    <p className="text-sm leading-relaxed text-muted-foreground">
-                      Se realizó una inspección mediante captura aérea con dron equipado con cámara de alta resolución
-                      de la estructura metálica del Puente Industrial. Las imágenes capturadas fueron procesadas
-                      mediante sistema de visión artificial para detectar automáticamente áreas con presencia de
-                      corrosión y clasificarlas según su nivel de severidad.
-                    </p>
-                  </div>
-
-                  {/* Scope */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-bold">2. Alcance de la Inspección</h3>
-                    <p className="text-sm leading-relaxed text-muted-foreground">
-                      El trabajo de inspección consistió en la evaluación de la condición/integridad de la estructura
-                      metálica, teniendo en cuenta:
-                    </p>
-                    <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
-                      <li>Estructura metálica - evaluación del estado y protección anticorrosiva</li>
-                      <li>Detección automática de corrosión mediante modelo entrenado</li>
-                      <li>Clasificación de severidad (Bajo, Medio, Alto)</li>
-                      <li>Registro fotográfico georreferenciado</li>
-                      <li>Analisis de envolvente y accesibilidad</li>
-                    </ul>
-                  </div>
-
-                  {/* References */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-bold">3. Referencias Normativas</h3>
-                    <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
-                      <li>ISO 8501-1 - Preparación de substratos de acero antes de la aplicación de pinturas</li>
-                      <li>ISO 4628 - Evaluación de la degradación de revestimientos</li>
-                      <li>UNE-EN ISO 12944 - Protección de estructuras de acero frente a la corrosión</li>
-                      <li>Especificaciones técnicas del cliente</li>
-                      <li>Proyecto de construcción de la estructura</li>
-                    </ul>
-                  </div>
-
-                  {/* Technical Observations */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-bold">4. Observaciones Complementarias</h3>
-                    <p className="text-sm font-semibold">Características de la estructura:</p>
-                    <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
-                      <li>Estructura metálica en acero al carbono</li>
-                      <li>Protección anticorrosiva mediante pintura epoxi</li>
-                      <li>Exposición a ambiente industrial (categoría C4)</li>
-                      <li>Año de construcción: 2015</li>
-                      <li>Última inspección: Enero 2023</li>
-                    </ul>
-                    <p className="mt-3 text-sm font-semibold">Metodología de inspección:</p>
-                    <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
-                      <li>Captura aérea mediante dron DJI Mavic 3 Enterprise</li>
-                      <li>Cámara de 20MP con zoom óptico 56x</li>
-                      <li>Procesamiento mediante visión artificial entrenada</li>
-                      <li>Georreferenciación de todas las imágenes capturadas</li>
-                      <li>Clasificación automática en tres niveles de severidad</li>
-                    </ul>
-                  </div>
-
-                  {/* Results Table */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-bold">5. Condición Observada</h3>
-                    <p className="text-sm font-semibold">5.1 - Inspección Visual de la Estructura Metálica</p>
-                    <p className="text-sm leading-relaxed text-muted-foreground">
-                      La estructura metálica evidencia diversos puntos de corrosión distribuidos a lo largo de su
-                      superficie. Se identificaron 47 áreas con presencia de corrosión, clasificadas según su nivel de
-                      severidad:
-                    </p>
-                    <table className="w-full border border-border text-sm">
-                      <thead className="bg-muted">
-                        <tr>
-                          <th className="border border-border p-2 text-left font-semibold">Nivel de Severidad</th>
-                          <th className="border border-border p-2 text-center font-semibold">Nº Detecciones</th>
-                          <th className="border border-border p-2 text-center font-semibold">Porcentaje</th>
-                          <th className="border border-border p-2 text-center font-semibold">Confianza Media</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td className="border border-border p-2">
-                            <span className="inline-flex items-center gap-2">
-                              <span className="h-3 w-3 rounded-full bg-severity-low"></span>
-                              Bajo (Low)
-                            </span>
-                          </td>
-                          <td className="border border-border p-2 text-center">23</td>
-                          <td className="border border-border p-2 text-center">48.9%</td>
-                          <td className="border border-border p-2 text-center">87.3%</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-border p-2">
-                            <span className="inline-flex items-center gap-2">
-                              <span className="h-3 w-3 rounded-full bg-severity-medium"></span>
-                              Medio (Medium)
-                            </span>
-                          </td>
-                          <td className="border border-border p-2 text-center">18</td>
-                          <td className="border border-border p-2 text-center">38.3%</td>
-                          <td className="border border-border p-2 text-center">91.2%</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-border p-2">
-                            <span className="inline-flex items-center gap-2">
-                              <span className="h-3 w-3 rounded-full bg-severity-high"></span>
-                              Alto (High)
-                            </span>
-                          </td>
-                          <td className="border border-border p-2 text-center">6</td>
-                          <td className="border border-border p-2 text-center">12.8%</td>
-                          <td className="border border-border p-2 text-center">94.7%</td>
-                        </tr>
-                        <tr className="bg-muted font-semibold">
-                          <td className="border border-border p-2">Total</td>
-                          <td className="border border-border p-2 text-center">47</td>
-                          <td className="border border-border p-2 text-center">100%</td>
-                          <td className="border border-border p-2 text-center">89.8%</td>
-                        </tr>
-                      </tbody>
-                    </table>
-
-                    {/* Detailed Findings */}
-                    <p className="mt-4 text-sm font-semibold">5.2 - Hallazgos Principales</p>
-                    <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
-                      <li>Corrosión ligera/moderada en zonas de unión soldada (fotografías 1 a 8)</li>
-                      <li>Degradación de la protección anticorrosiva en áreas expuestas a mayor humedad</li>
-                      <li>Corrosión severa localizada en 6 puntos críticos que requieren intervención inmediata</li>
-                      <li>Las mediciones de espesor no evidencian pérdida significativa de material</li>
-                      <li>La estructura mantiene su integridad estructural general</li>
-                    </ul>
-                  </div>
-
-                  {/* Conclusions */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-bold">6. Conclusiones</h3>
-                    <p className="text-sm leading-relaxed text-muted-foreground">
-                      No se identificó ningún riesgo inmediato a la integridad estructural. Se recomienda, sin embargo,
-                      en una próxima intervención realizar las siguientes tareas:
-                    </p>
-                    <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
-                      <li>Intervención inmediata en las 6 áreas de severidad alta detectadas</li>
-                      <li>Beneficiación total de la protección anticorrosiva en áreas afectadas</li>
-                      <li>Planificar mantenimiento preventivo para áreas de severidad media</li>
-                      <li>Monitoreo continuo mediante inspecciones periódicas con dron</li>
-                      <li>Realizar nueva inspección en 6 meses para evaluar evolución</li>
-                    </ul>
-                  </div>
-
-                  {/* Google Maps */}
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-bold">7. Vista de Ubicación</h3>
-                    <div className="aspect-video w-full overflow-hidden rounded-lg border border-border bg-muted">
-                      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                        [Mapa de Google Maps con ubicación de la estructura]
-                        <br />
-                        Coordenadas: 43.2627° N, 2.9253° W
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Photo Annex */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-bold">8. Anexo Fotográfico</h3>
-
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <div className="aspect-video w-full overflow-hidden rounded-lg border border-border bg-muted">
-                          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                            [Fotografía 1 - Imagen de dron con detección marcada]
-                          </div>
-                        </div>
-                        <p className="text-xs font-semibold">Fotografía 1</p>
-                        <p className="text-xs text-muted-foreground">
-                          Corrosión moderada en viga principal. Nivel de severidad: Medio.
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Coordenadas GPS: 43.2627° N, 2.9253° W | Altitud: 45m | Fecha: 15/01/2025 10:23
-                        </p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="aspect-video w-full overflow-hidden rounded-lg border border-border bg-muted">
-                          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                            [Fotografía 2 - Imagen de dron con detección marcada]
-                          </div>
-                        </div>
-                        <p className="text-xs font-semibold">Fotografía 2</p>
-                        <p className="text-xs text-muted-foreground">
-                          Corrosión severa en unión soldada. Nivel de severidad: Alto.
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Coordenadas GPS: 43.2629° N, 2.9251° W | Altitud: 48m | Fecha: 15/01/2025 10:25
-                        </p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="aspect-video w-full overflow-hidden rounded-lg border border-border bg-muted">
-                          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                            [Fotografía 3 - Imagen de dron con detección marcada]
-                          </div>
-                        </div>
-                        <p className="text-xs font-semibold">Fotografía 3</p>
-                        <p className="text-xs text-muted-foreground">
-                          Corrosión ligera en superficie lateral. Nivel de severidad: Bajo.
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Coordenadas GPS: 43.2625° N, 2.9255° W | Altitud: 42m | Fecha: 15/01/2025 10:28
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Footer */}
-                  <div className="border-t-2 border-border pt-6 text-center">
-                    <div className="space-y-2 text-xs text-muted-foreground">
-                      <div className="flex justify-between">
-                        <span>Data da Inspeção: 15/01/2025</span>
-                        <span>Elaborado por: Ing. María González</span>
-                        <span>Data: 20/01/2025</span>
-                      </div>
-                      <div className="pt-4 font-semibold">
-                        Generado por IKUSKI - Sistema de Detección de Corrosión mediante IA
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            ) : (
-              <Card className="p-6">
-                <h2 className="mb-4 text-lg font-semibold">Informes Recientes</h2>
-                <div className="space-y-3">
-                  {[
-                    {
-                      name: "Puente Industrial A-23",
-                      code: "1901",
-                      date: "15 Ene 2025",
-                      detections: 47,
-                      severity: "high",
-                    },
-                    {
-                      name: "Torre Metálica B-15",
-                      code: "1902",
-                      date: "12 Ene 2025",
-                      detections: 23,
-                      severity: "medium",
-                    },
-                    {
-                      name: "Estructura C-45",
-                      code: "1903",
-                      date: "08 Ene 2025",
-                      detections: 31,
-                      severity: "medium",
-                    },
-                    { name: "Tanque D-12", code: "1904", date: "05 Ene 2025", detections: 15, severity: "low" },
-                  ].map((report, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between rounded-lg border border-border p-3 hover:bg-muted/50"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                          <FileText className="h-5 w-5 text-primary" />
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium">{report.name}</div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <span>Nº {report.code}</span>
-                            <span>•</span>
-                            <span>{report.detections} detecciones</span>
-                            <span>•</span>
-                            <span>{report.date}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <Button variant="ghost" size="sm">
-                        <Download className="h-4 w-4" />
+                return (
+                  <div key={img.id} className="border border-border rounded-lg p-4 space-y-4">
+                    {/* Encabezado */}
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold">Fotografía {index + 1}</h3>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => generateAIAnalysis(img.id, imgDetections)}
+                        disabled={generatingAI}
+                      >
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        Generar Análisis IA
                       </Button>
                     </div>
-                  ))}
-                </div>
-              </Card>
-            )}
 
-            <Card className="p-6">
-              <h2 className="mb-4 text-lg font-semibold">Estadísticas de Informes</h2>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <div className="text-2xl font-bold">24</div>
-                  <div className="text-xs text-muted-foreground">Total Informes</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-2xl font-bold">8</div>
-                  <div className="text-xs text-muted-foreground">Este Mes</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-2xl font-bold">1,247</div>
-                  <div className="text-xs text-muted-foreground">Detecciones Totales</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-2xl font-bold">156</div>
-                  <div className="text-xs text-muted-foreground">Áreas Inspeccionadas</div>
-                </div>
+                    {/* Imagen con Bounding Boxes */}
+                    <div className="aspect-video w-full overflow-hidden rounded-lg border border-border bg-muted">
+                      <AdvancedImageViewer
+                        imageUrl={img.url}
+                        imageName={img.filename}
+                        boundingBoxes={boundingBoxes}
+                        showBoundingBoxes={true}
+                      />
+                    </div>
+
+                    {/* Metadata */}
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="font-medium">Archivo:</span> {img.filename}
+                      </div>
+                      <div>
+                        <span className="font-medium">Fecha:</span> {img.timestamp || new Date().toLocaleString('es-ES')}
+                      </div>
+                      <div className="col-span-2 flex items-center gap-1">
+                        <MapPin className="h-4 w-4 text-primary" />
+                        <span className="font-medium">Coordenadas GPS:</span>
+                        <span>{formatGPSCoordinates(gps.latitude, gps.longitude, gps.altitude)}</span>
+                      </div>
+                    </div>
+
+                    {/* Mapa de Ubicación */}
+                    {imageMaps[img.id] && (
+                      <div className="border border-border rounded-lg p-4 bg-muted/30">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="font-medium flex items-center gap-2">
+                            <MapPin className="h-4 w-4 text-primary" />
+                            Ubicación Geográfica
+                          </h4>
+                          <div className="flex gap-3 text-xs">
+                            <a
+                              href={getOpenStreetMapUrl(gps.latitude, gps.longitude)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline flex items-center gap-1"
+                            >
+                              🗺️ OpenStreetMap
+                            </a>
+                            <a
+                              href={getGoogleMapsUrl(gps.latitude, gps.longitude)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline flex items-center gap-1"
+                            >
+                              🌍 Google Maps
+                            </a>
+                          </div>
+                        </div>
+                        <img
+                          src={imageMaps[img.id]!}
+                          alt="Mapa de ubicación"
+                          className="w-full max-w-2xl mx-auto rounded border border-border"
+                        />
+                        <p className="text-xs text-center text-muted-foreground mt-2">
+                          {gps.latitude}, {gps.longitude}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Estadísticas de Detección */}
+                    <div className="grid grid-cols-4 gap-4 p-3 bg-muted rounded-lg text-sm">
+                      <div>
+                        <div className="font-medium">Detecciones</div>
+                        <div className="text-2xl font-bold">{imgDetections.length}</div>
+                      </div>
+                      <div>
+                        <div className="font-medium flex items-center gap-1">
+                          <div className="h-3 w-3 rounded-full bg-severity-high" />
+                          Alta
+                        </div>
+                        <div className="text-2xl font-bold">{imgDetections.filter(d => d.severity === "alto").length}</div>
+                      </div>
+                      <div>
+                        <div className="font-medium flex items-center gap-1">
+                          <div className="h-3 w-3 rounded-full bg-severity-medium" />
+                          Media
+                        </div>
+                        <div className="text-2xl font-bold">{imgDetections.filter(d => d.severity === "medio").length}</div>
+                      </div>
+                      <div>
+                        <div className="font-medium flex items-center gap-1">
+                          <div className="h-3 w-3 rounded-full bg-severity-low" />
+                          Baja
+                        </div>
+                        <div className="text-2xl font-bold">{imgDetections.filter(d => d.severity === "bajo").length}</div>
+                      </div>
+                    </div>
+
+                    {/* Análisis Editable */}
+                    <div className="space-y-2">
+                      <Label htmlFor={`analysis-${img.id}`}>Análisis Técnico (Editable)</Label>
+                      <textarea
+                        id={`analysis-${img.id}`}
+                        className="w-full min-h-[120px] rounded-md border border-border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        value={imageAnalysis[img.id] || "Haz clic en 'Generar Análisis IA' para obtener un análisis automático, o escribe tu propio análisis aquí..."}
+                        onChange={(e) => handleAnalysisChange(img.id, e.target.value)}
+                        placeholder="Análisis técnico de la corrosión detectada..."
+                      />
+                    </div>
+                  </div>
+                )
+              })}
               </div>
             </Card>
-          </div>
+          )}
         </div>
       </div>
     </div>

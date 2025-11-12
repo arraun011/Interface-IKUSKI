@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { IkuskiLogo } from "./ikuski-logo"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
+import Image from "next/image"
 
 export function SidebarNav() {
   const pathname = usePathname()
@@ -59,6 +60,15 @@ export function SidebarNav() {
             <LogOut className="h-4 w-4" />
             Logout
           </Button>
+          <div className="flex justify-center pt-2 border-t border-border/50">
+            <Image
+              src="/images/logo.png"
+              alt="RDT"
+              width={80}
+              height={26}
+              className="object-contain opacity-60"
+            />
+          </div>
         </div>
       </div>
     </div>

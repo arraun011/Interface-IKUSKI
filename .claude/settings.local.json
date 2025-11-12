@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(copy:*)",
+      "Bash(if [ -f .gitignore ])",
+      "Bash(then echo \"\")",
+      "Bash(.gitignore)",
+      "Bash(else echo \"# Variables de entorno con API keys\")",
+      "Bash(fi)",
+      "Bash(node verify-maps.js:*)",
+      "Bash(npm run dev:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(npm install openai)",
+      "Bash(git add:*)",
+      "Bash(del nul)",
+      "Bash(rm:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
