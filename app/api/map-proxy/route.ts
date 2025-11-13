@@ -20,7 +20,10 @@ export async function GET(request: NextRequest) {
     // Validar que la URL sea de un proveedor de mapas válido
     const validProviders = [
       'maps.googleapis.com',
-      'staticmap.openstreetmap.de'
+      'staticmap.openstreetmap.de',
+      'maps.geoapify.com',
+      'api.maptiler.com',
+      'api.mapbox.com'
     ]
 
     const isValidProvider = validProviders.some(provider =>
@@ -28,8 +31,9 @@ export async function GET(request: NextRequest) {
     )
 
     if (!isValidProvider) {
+      console.error('[Map Proxy] Invalid provider. URL:', mapUrl)
       return NextResponse.json(
-        { error: 'Invalid map provider' },
+        { error: 'Invalid map provider', url: mapUrl },
         { status: 400 }
       )
     }

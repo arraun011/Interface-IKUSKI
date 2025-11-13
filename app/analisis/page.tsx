@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
 import { Badge } from "@/components/ui/badge"
-import { Upload, Download, Play, Filter, ImageIcon, Folder, FolderOpen, CheckCircle2, X, Copy } from "lucide-react"
+import { Upload, Download, Play, Filter, ImageIcon, Folder, FolderOpen, CheckCircle2, X, Copy, Save, FileDown, FileUp } from "lucide-react"
 import { useState, useRef, useEffect } from "react"
 import { useToast } from "@/hooks/use-toast"
 import { ImageGallery } from "@/components/image-gallery"
@@ -13,6 +13,8 @@ import { AdvancedImageViewer, BoundingBox } from "@/components/advanced-image-vi
 import { useModelConfig, usePaths } from "@/contexts/config-context"
 import { useAnalysisState, ImageItem, Detection } from "@/contexts/analysis-context"
 import { detectDuplicates, DuplicateGroup } from "@/lib/phash-utils"
+import { SessionManager } from "@/components/session-manager"
+import { saveAnalysisSession, loadAnalysisSession, exportSessionToFile, parseSessionFile, AnalysisSessionExport } from "@/lib/session-storage"
 import Image from "next/image"
 
 interface Model {
@@ -56,6 +58,10 @@ export default function AnalisisPage() {
   const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([])
   const [showDuplicates, setShowDuplicates] = useState(false)
   const [isDetectingDuplicates, setIsDetectingDuplicates] = useState(false)
+  const [showSessionDialog, setShowSessionDialog] = useState(false)
+  const [sessionDialogMode, setSessionDialogMode] = useState<'save' | 'load'>('save')
+  const [pendingSessionImport, setPendingSessionImport] = useState<AnalysisSessionExport | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { toast } = useToast()
   const modelConfig = useModelConfig()
@@ -439,7 +445,7 @@ export default function AnalisisPage() {
 
     // Crear CSV con resultados
     const csvContent = [
-      ['Archivo', 'Severidad', 'Confianza', 'BBox_X', 'BBox_Y', 'BBox_W', 'BBox_H', 'Timestamp'].join(','),
+      ['Archivo', 'Nivel_Corrosion', 'Confianza', 'BBox_X', 'BBox_Y', 'BBox_W', 'BBox_H', 'Timestamp'].join(','),
       ...detections.map(d =>
         [d.filename, d.severity, d.confidence.toFixed(3), d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h, d.timestamp].join(',')
       )
@@ -457,6 +463,201 @@ export default function AnalisisPage() {
       description: "Resultados exportados a CSV"
     })
   }
+
+  // Guardar sesión actual
+  const handleSaveSession = (name: string) => {
+    try {
+      if (loadedImages.length === 0) {
+        toast({
+          title: "Sin Imágenes",
+          description: "No hay imágenes cargadas para guardar",
+          variant: "destructive"
+        })
+        return
+      }
+
+      saveAnalysisSession({
+        name,
+        images: loadedImages.map(img => ({
+          id: img.id,
+          filename: img.filename,
+          url: img.url
+        })),
+        detections: detections.map(d => ({
+          image: d.image,
+          class_name: d.class_name,
+          severity: d.severity,
+          confidence: d.confidence,
+          bbox: d.bbox
+        })),
+        modelPath: modelPath || '',
+        confidenceThreshold,
+        iouThreshold
+      })
+
+      toast({
+        title: "Sesión Guardada",
+        description: `La sesión "${name}" se ha guardado correctamente con ${loadedImages.length} imágenes`
+      })
+    } catch (error: any) {
+      console.error('Error saving session:', error)
+      toast({
+        title: "Error al Guardar",
+        description: error.message || "No se pudo guardar la sesión. Puede que las imágenes sean demasiado grandes.",
+        variant: "destructive"
+      })
+    }
+  }
+
+  // Cargar sesión guardada
+  const handleLoadSession = (id: string) => {
+    try {
+      const session = loadAnalysisSession(id)
+      if (!session) {
+        throw new Error('Sesión no encontrada')
+      }
+
+      // Restaurar imágenes (sin los archivos File originales)
+      const restoredImages = session.images.map(img => ({
+        ...img,
+        file: undefined as any
+      }))
+
+      // Limpiar estado actual y cargar sesión
+      addImages(restoredImages)
+      setDetections(session.detections as Detection[])
+      setModel(session.modelPath, session.modelPath.split('/').pop() || 'modelo')
+      setThresholds(session.confidenceThreshold, session.iouThreshold)
+
+      toast({
+        title: "Sesión Cargada",
+        description: `Se cargó la sesión "${session.name}" con ${session.images.length} imágenes`
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "No se pudo cargar la sesión",
+        variant: "destructive"
+      })
+    }
+  }
+
+  // Exportar sesión a archivo JSON
+  const handleExportSession = () => {
+    if (loadedImages.length === 0) {
+      toast({
+        title: "Sin Imágenes",
+        description: "No hay imágenes cargadas para exportar",
+        variant: "destructive"
+      })
+      return
+    }
+
+    try {
+      const sessionData = {
+        id: Date.now().toString(),
+        name: `Sesión_${new Date().toLocaleDateString('es-ES')}`,
+        date: new Date().toISOString(),
+        images: loadedImages,
+        detections,
+        modelPath: modelPath || '',
+        confidenceThreshold,
+        iouThreshold
+      }
+
+      exportSessionToFile(sessionData)
+
+      toast({
+        title: "Sesión Exportada",
+        description: "Se descargó el archivo JSON con la configuración de la sesión"
+      })
+    } catch (error: any) {
+      console.error('Error exporting session:', error)
+      toast({
+        title: "Error al Exportar",
+        description: error.message || "No se pudo exportar la sesión",
+        variant: "destructive"
+      })
+    }
+  }
+
+  // Importar archivo de sesión JSON
+  const handleImportSessionFile = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const content = await file.text()
+      const sessionData = parseSessionFile(content)
+
+      setPendingSessionImport(sessionData)
+
+      toast({
+        title: "Archivo Cargado",
+        description: `Ahora carga las ${sessionData.imageFilenames.length} imágenes: ${sessionData.imageFilenames.join(', ')}`
+      })
+    } catch (error: any) {
+      toast({
+        title: "Error al Importar",
+        description: error.message,
+        variant: "destructive"
+      })
+    }
+
+    // Limpiar input
+    if (event.target) event.target.value = ''
+  }
+
+  // Al cargar imágenes, si hay una sesión pendiente, aplicar las detecciones
+  useEffect(() => {
+    if (pendingSessionImport && loadedImages.length > 0) {
+      // Verificar que las imágenes cargadas coincidan con los nombres esperados
+      const loadedFilenames = loadedImages.map(img => img.filename)
+      const expectedFilenames = pendingSessionImport.imageFilenames
+
+      const allMatch = expectedFilenames.every(name => loadedFilenames.includes(name))
+
+      if (allMatch) {
+        // Restaurar detecciones
+        const filenameToUrl = new Map<string, string>()
+        loadedImages.forEach(img => {
+          filenameToUrl.set(img.filename, img.url)
+        })
+
+        const restoredDetections: Detection[] = pendingSessionImport.detections.map(d => ({
+          image: filenameToUrl.get(d.filename) || '',
+          filename: d.filename,
+          class_name: d.class_name,
+          severity: d.severity,
+          confidence: d.confidence,
+          bbox: d.bbox,
+          timestamp: new Date().toISOString()
+        }))
+
+        setDetections(restoredDetections)
+        setModel(pendingSessionImport.modelPath, pendingSessionImport.modelPath.split('/').pop() || 'modelo')
+        setThresholds(pendingSessionImport.confidenceThreshold, pendingSessionImport.iouThreshold)
+
+        toast({
+          title: "Sesión Restaurada",
+          description: `Se restauraron ${restoredDetections.length} detecciones`
+        })
+
+        setPendingSessionImport(null)
+      } else {
+        const missing = expectedFilenames.filter(name => !loadedFilenames.includes(name))
+        toast({
+          title: "Imágenes Faltantes",
+          description: `Faltan: ${missing.join(', ')}`,
+          variant: "destructive"
+        })
+      }
+    }
+  }, [loadedImages, pendingSessionImport])
 
   return (
     <div className="flex h-screen bg-background">
@@ -516,6 +717,23 @@ export default function AnalisisPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportSession}
+              disabled={loadedImages.length === 0}
+            >
+              <FileDown className="mr-2 h-4 w-4" />
+              Exportar Sesión
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleImportSessionFile}
+            >
+              <FileUp className="mr-2 h-4 w-4" />
+              Importar Sesión
+            </Button>
             <Button
               variant={showThresholdPanel ? "default" : "outline"}
               size="sm"
@@ -655,34 +873,34 @@ export default function AnalisisPage() {
                 </p>
               </div>
 
-              {/* Filtros de Severidad */}
+              {/* Filtros de Nivel de Corrosión */}
               <div className="space-y-3">
-                <label className="text-sm font-medium">Filtrar por Severidad</label>
+                <label className="text-sm font-medium">Filtrar por Nivel de Corrosión</label>
                 <div className="flex flex-wrap gap-2">
                   <Badge
                     variant={severityFilter.includes("alto") ? "default" : "outline"}
                     className={`cursor-pointer ${severityFilter.includes("alto") ? "bg-severity-high hover:bg-severity-high/80" : ""}`}
                     onClick={() => toggleSeverityFilter("alto")}
                   >
-                    Alto
+                    Corrosión Extensa
                   </Badge>
                   <Badge
                     variant={severityFilter.includes("medio") ? "default" : "outline"}
                     className={`cursor-pointer ${severityFilter.includes("medio") ? "bg-severity-medium hover:bg-severity-medium/80" : ""}`}
                     onClick={() => toggleSeverityFilter("medio")}
                   >
-                    Medio
+                    Corrosión Moderada
                   </Badge>
                   <Badge
                     variant={severityFilter.includes("bajo") ? "default" : "outline"}
                     className={`cursor-pointer ${severityFilter.includes("bajo") ? "bg-severity-low hover:bg-severity-low/80" : ""}`}
                     onClick={() => toggleSeverityFilter("bajo")}
                   >
-                    Bajo
+                    Corrosión Leve
                   </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Selecciona los niveles de severidad a mostrar en los resultados
+                  Selecciona los niveles de deterioro a mostrar en los resultados
                 </p>
               </div>
 
@@ -837,6 +1055,48 @@ export default function AnalisisPage() {
                     Cerrar
                   </Button>
                 </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Input oculto para cargar archivos JSON */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        onChange={handleFileChange}
+        style={{ display: 'none' }}
+      />
+
+      {/* Mensaje de sesión pendiente */}
+      {pendingSessionImport && (
+        <div className="fixed bottom-4 right-4 z-50 max-w-md">
+          <Card className="p-4 border-blue-500 bg-blue-50 dark:bg-blue-950">
+            <div className="flex items-start gap-3">
+              <FileUp className="h-5 w-5 text-blue-500 mt-0.5" />
+              <div className="flex-1">
+                <h4 className="font-semibold text-blue-900 dark:text-blue-100">Sesión Lista para Importar</h4>
+                <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                  Carga las siguientes imágenes para restaurar la sesión:
+                </p>
+                <ul className="text-xs text-blue-600 dark:text-blue-400 mt-2 list-disc list-inside">
+                  {pendingSessionImport.imageFilenames.slice(0, 5).map((name, i) => (
+                    <li key={i}>{name}</li>
+                  ))}
+                  {pendingSessionImport.imageFilenames.length > 5 && (
+                    <li>... y {pendingSessionImport.imageFilenames.length - 5} más</li>
+                  )}
+                </ul>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => setPendingSessionImport(null)}
+                >
+                  Cancelar
+                </Button>
               </div>
             </div>
           </Card>

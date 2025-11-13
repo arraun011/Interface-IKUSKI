@@ -3,13 +3,33 @@
  */
 
 export interface MapOptions {
-  latitude: string
-  longitude: string
+  latitude: string | number
+  longitude: string | number
   zoom?: number
   width?: number
   height?: number
   mapType?: 'roadmap' | 'satellite' | 'hybrid' | 'terrain'
   apiKey?: string
+}
+
+/**
+ * Convierte coordenada a string válido
+ */
+function toCoordinateString(coord: string | number | undefined | null): string {
+  if (coord === undefined || coord === null) {
+    console.error('Invalid coordinate: undefined or null')
+    return '0'
+  }
+
+  const coordStr = typeof coord === 'number' ? coord.toString() : coord
+  const coordNum = parseFloat(coordStr)
+
+  if (isNaN(coordNum)) {
+    console.error('Invalid coordinate: NaN', coord)
+    return '0'
+  }
+
+  return coordStr
 }
 
 /**
@@ -29,9 +49,14 @@ export function getStaticMapImageUrl(options: MapOptions): string {
     apiKey
   } = options
 
-  // TEMPORALMENTE: Usar solo OpenStreetMap (sin problemas de facturación/CORS)
-  // TODO: Volver a Google Maps cuando se habilite facturación en Google Cloud
-  const useGoogleMaps = false // Cambiar a true cuando funcione
+  // Convertir coordenadas a strings válidos
+  const lat = toCoordinateString(latitude)
+  const lon = toCoordinateString(longitude)
+
+  console.log('[Maps] Generating map URL for coordinates:', { lat, lon })
+
+  // Usar Google Maps si hay API key disponible
+  const useGoogleMaps = true // Activado con nueva API key
 
   // Si hay API key Y está habilitado, usar Google Maps
   if (useGoogleMaps && (apiKey || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY)) {
@@ -39,31 +64,26 @@ export function getStaticMapImageUrl(options: MapOptions): string {
     const baseUrl = 'https://maps.googleapis.com/maps/api/staticmap'
 
     const params = new URLSearchParams({
-      center: `${latitude},${longitude}`,
+      center: `${lat},${lon}`,
       zoom: zoom.toString(),
       size: `${width}x${height}`,
       maptype: mapType,
-      markers: `color:red|label:📍|${latitude},${longitude}`,
+      markers: `color:red|label:📍|${lat},${lon}`,
       scale: '2', // Alta resolución
       key: key!
     })
 
-    return `${baseUrl}?${params.toString()}`
+    const url = `${baseUrl}?${params.toString()}`
+    console.log('[Maps] Google Maps URL:', url)
+    return url
   }
 
-  // Usar OpenStreetMap (gratuito, sin restricciones)
-  // https://staticmap.openstreetmap.de/
-  const baseUrl = 'https://staticmap.openstreetmap.de/staticmap.php'
+  // SOLUCIÓN TEMPORAL: Usar API interna para generar imagen de mapa
+  // Esto generará una imagen con las coordenadas y un tile de OSM de fondo
+  const url = `/api/map-proxy/generate?lat=${lat}&lon=${lon}&zoom=${zoom}&width=${width}&height=${height}`
 
-  const params = new URLSearchParams({
-    center: `${latitude},${longitude}`,
-    zoom: zoom.toString(),
-    size: `${width}x${height}`,
-    maptype: 'mapnik', // Estilo de mapa estándar de OSM
-    markers: `${latitude},${longitude},red-pushpin` // Marcador rojo
-  })
-
-  return `${baseUrl}?${params.toString()}`
+  console.log('[Maps] Internal map generator URL:', url)
+  return url
 }
 
 /**
@@ -88,8 +108,10 @@ export function getMapProvider(): string {
  * @param longitude - Longitud
  * @returns URL para abrir en navegador
  */
-export function getOpenStreetMapUrl(latitude: string, longitude: string): string {
-  return `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}&zoom=17#map=17/${latitude}/${longitude}`
+export function getOpenStreetMapUrl(latitude: string | number, longitude: string | number): string {
+  const lat = toCoordinateString(latitude)
+  const lon = toCoordinateString(longitude)
+  return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}&zoom=17#map=17/${lat}/${lon}`
 }
 
 /**
@@ -98,8 +120,10 @@ export function getOpenStreetMapUrl(latitude: string, longitude: string): string
  * @param longitude - Longitud
  * @returns URL para abrir en navegador
  */
-export function getGoogleMapsUrl(latitude: string, longitude: string): string {
-  return `https://www.google.com/maps?q=${latitude},${longitude}&z=17`
+export function getGoogleMapsUrl(latitude: string | number, longitude: string | number): string {
+  const lat = toCoordinateString(latitude)
+  const lon = toCoordinateString(longitude)
+  return `https://www.google.com/maps?q=${lat},${lon}&z=17`
 }
 
 /**
@@ -198,9 +222,47 @@ export function getDistanceBetweenPoints(
 }
 
 /**
+ * Redimensiona una imagen manteniendo su aspecto ratio
+ * @param img - Elemento de imagen
+ * @param maxWidth - Ancho máximo (default: 1024)
+ * @param maxHeight - Alto máximo (default: 1024)
+ * @returns Canvas con la imagen redimensionada
+ */
+function resizeImage(img: HTMLImageElement, maxWidth: number = 1024, maxHeight: number = 1024): HTMLCanvasElement {
+  let width = img.width
+  let height = img.height
+
+  // Calcular nuevas dimensiones manteniendo el aspect ratio
+  if (width > height) {
+    if (width > maxWidth) {
+      height = (height * maxWidth) / width
+      width = maxWidth
+    }
+  } else {
+    if (height > maxHeight) {
+      width = (width * maxHeight) / height
+      height = maxHeight
+    }
+  }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new Error('Could not get canvas context')
+  }
+
+  ctx.drawImage(img, 0, 0, width, height)
+  return canvas
+}
+
+/**
  * Convierte una imagen de URL a base64
  * Necesario para incluir imágenes de Google Maps en documentos exportados
  * Usa un proxy para evitar problemas de CORS
+ * REDIMENSIONA la imagen a 1024px máximo para reducir tamaño del payload
  */
 export async function imageUrlToBase64(url: string): Promise<string> {
   try {
@@ -213,14 +275,24 @@ export async function imageUrlToBase64(url: string): Promise<string> {
 
       if (response.ok) {
         const blob = await response.blob()
+
+        // Crear imagen desde blob para redimensionar
+        const img = new Image()
+        const imageUrl = URL.createObjectURL(blob)
+
         return new Promise((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onloadend = () => {
-            const base64 = reader.result as string
-            resolve(base64)
+          img.onload = () => {
+            try {
+              URL.revokeObjectURL(imageUrl)
+              const canvas = resizeImage(img)
+              const base64 = canvas.toDataURL('image/jpeg', 0.85) // JPEG con 85% calidad para reducir tamaño
+              resolve(base64)
+            } catch (error) {
+              reject(error)
+            }
           }
-          reader.onerror = reject
-          reader.readAsDataURL(blob)
+          img.onerror = reject
+          img.src = imageUrl
         })
       }
     } catch (fetchError) {
@@ -234,18 +306,8 @@ export async function imageUrlToBase64(url: string): Promise<string> {
 
       img.onload = () => {
         try {
-          const canvas = document.createElement('canvas')
-          canvas.width = img.width
-          canvas.height = img.height
-
-          const ctx = canvas.getContext('2d')
-          if (!ctx) {
-            reject(new Error('Could not get canvas context'))
-            return
-          }
-
-          ctx.drawImage(img, 0, 0)
-          const base64 = canvas.toDataURL('image/png')
+          const canvas = resizeImage(img)
+          const base64 = canvas.toDataURL('image/jpeg', 0.85) // JPEG con 85% calidad
           resolve(base64)
         } catch (canvasError) {
           reject(canvasError)
@@ -295,5 +357,14 @@ export async function getStaticMapBase64(options: MapOptions): Promise<string | 
  */
 export function getStaticMapProxyUrl(options: MapOptions): string {
   const mapUrl = getStaticMapImageUrl(options)
-  return `/api/map-proxy?url=${encodeURIComponent(mapUrl)}`
+
+  // Si ya es una URL interna, devolverla directamente (sin proxy)
+  if (mapUrl.startsWith('/')) {
+    console.log('[Maps] Using internal map generator:', mapUrl)
+    return mapUrl
+  }
+
+  const proxyUrl = `/api/map-proxy?url=${encodeURIComponent(mapUrl)}`
+  console.log('[Maps] Proxy URL generated:', proxyUrl)
+  return proxyUrl
 }

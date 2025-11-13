@@ -1,5 +1,6 @@
 /**
  * Utilidades para exportar informes a Word y funcionalidad de impresión
+ * Soporte multiidioma y logos personalizables
  */
 
 import {
@@ -10,23 +11,28 @@ import {
   isValidGPSCoordinates,
   formatGPSCoordinates
 } from './maps-utils'
+import { getTranslations, type ReportTranslations } from './report-translations'
 
-interface ReportData {
+export interface ReportData {
   projectData: {
     workNumber: string
     orderNumber: string
     projectName: string
     location: string
+    city?: string
+    country?: string
     inspector: string
     reviewer: string
     client: string
     inspectionDate: string
     reportDate: string
+    introduction: string
   }
   images: Array<{
     id: string
     filename: string
     url: string
+    urlWithBoxes?: string // Imagen con bounding boxes dibujados
     timestamp: string
     gps: {
       latitude: string
@@ -40,152 +46,41 @@ interface ReportData {
     analysis: string
     mapImageBase64?: string | null // Imagen del mapa en base64
   }>
+  language?: 'es' | 'en' | 'pt'
+  rdtLogoBase64?: string
+  clientLogoBase64?: string
+  coverImageBase64?: string // Imagen aérea para la portada
 }
 
 /**
- * Genera y descarga un informe en formato Word (.docx)
+ * Genera y descarga un informe en formato Word (.doc)
  */
-export async function exportToWord(data: ReportData, logoBase64?: string): Promise<void> {
+export async function exportToWord(data: ReportData): Promise<void> {
   try {
+    const language = data.language || 'es'
+    const t = getTranslations(language)
+
     // Crear el HTML del documento
-    const htmlContent = generateReportHTML(data, logoBase64)
+    const htmlContent = generateReportHTML(data, t)
 
     // Crear blob con el contenido HTML en formato compatible con Word
     const blob = new Blob(
-      [
-        `
-        <html xmlns:o='urn:schemas-microsoft-com:office:office'
-              xmlns:w='urn:schemas-microsoft-com:office:word'
-              xmlns='http://www.w3.org/TR/REC-html40'>
-        <head>
-          <meta charset='utf-8'>
-          <title>Informe de Inspección - ${data.projectData.projectName}</title>
-          <style>
-            body {
-              font-family: Calibri, Arial, sans-serif;
-              font-size: 11pt;
-              line-height: 1.5;
-              margin: 2cm;
-            }
-            h1 {
-              font-size: 18pt;
-              font-weight: bold;
-              color: #2563eb;
-              border-bottom: 2px solid #2563eb;
-              padding-bottom: 10px;
-              margin-top: 20px;
-            }
-            h2 {
-              font-size: 14pt;
-              font-weight: bold;
-              color: #1e40af;
-              margin-top: 15px;
-            }
-            h3 {
-              font-size: 12pt;
-              font-weight: bold;
-              margin-top: 10px;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin: 10px 0;
-            }
-            td, th {
-              border: 1px solid #000;
-              padding: 8px;
-              text-align: left;
-            }
-            th {
-              background-color: #e5e7eb;
-              font-weight: bold;
-            }
-            .header {
-              text-align: center;
-              margin-bottom: 30px;
-            }
-            .logo {
-              max-width: 250px;
-              height: auto;
-              margin: 0 auto 20px auto;
-              display: block;
-            }
-            .photo-section {
-              page-break-before: always;
-              margin-top: 20px;
-            }
-            .photo-container {
-              margin: 20px 0;
-              page-break-inside: avoid;
-            }
-            .photo-img {
-              width: 100%;
-              max-width: 100%;
-              height: auto;
-              border: 1px solid #ccc;
-            }
-            .map-container {
-              margin: 15px 0;
-              border: 1px solid #ddd;
-              padding: 10px;
-              background-color: #f9fafb;
-            }
-            .map-img {
-              width: 100%;
-              max-width: 600px;
-              height: auto;
-              border: 1px solid #ccc;
-              display: block;
-              margin: 10px auto;
-            }
-            .map-link {
-              display: block;
-              text-align: center;
-              color: #2563eb;
-              text-decoration: none;
-              font-size: 10pt;
-              margin-top: 5px;
-              font-weight: bold;
-            }
-            .map-link:hover {
-              text-decoration: underline;
-            }
-            .metadata {
-              font-size: 9pt;
-              color: #666;
-              margin-top: 5px;
-            }
-            .severity-high {
-              color: #dc2626;
-              font-weight: bold;
-            }
-            .severity-medium {
-              color: #f59e0b;
-              font-weight: bold;
-            }
-            .severity-low {
-              color: #10b981;
-              font-weight: bold;
-            }
-            .footer {
-              margin-top: 40px;
-              border-top: 1px solid #ccc;
-              padding-top: 10px;
-              font-size: 9pt;
-              text-align: center;
-              color: #666;
-            }
-          </style>
-        </head>
-        <body>
-          ${htmlContent}
-        </body>
-        </html>
-      `
-      ],
-      {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      }
+      [`
+<!DOCTYPE html>
+<html xmlns:o='urn:schemas-microsoft-com:office:office'
+      xmlns:w='urn:schemas-microsoft-com:office:word'
+      xmlns='http://www.w3.org/TR/REC-html40'>
+<head>
+  <meta charset='utf-8'>
+  <title>${t.title} - ${data.projectData.projectName}</title>
+  ${generateStyles()}
+</head>
+<body>
+  ${htmlContent}
+</body>
+</html>
+      `],
+      { type: 'application/msword' }
     )
 
     // Crear enlace de descarga
@@ -208,10 +103,309 @@ export async function exportToWord(data: ReportData, logoBase64?: string): Promi
 }
 
 /**
+ * Genera los estilos CSS del documento
+ */
+export function generateStyles(): string {
+  return `
+  <style>
+    @page {
+      size: A4;
+      margin: 1cm 1.5cm 1.5cm 1.5cm;
+    }
+
+    body {
+      font-family: Calibri, Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.5;
+      margin: 0;
+      padding: 0;
+    }
+
+    .page-header {
+      width: 100%;
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 3px;
+      margin-bottom: 8px;
+    }
+
+    .header-logos {
+      display: table;
+      width: 100%;
+      margin-bottom: 5px;
+    }
+
+    .header-logo-left {
+      display: table-cell;
+      width: 50%;
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    .header-logo-right {
+      display: table-cell;
+      width: 50%;
+      text-align: right;
+      vertical-align: middle;
+    }
+
+    .header-logo-left img,
+    .header-logo-right img {
+      max-height: 50px;
+      max-width: 150px;
+      height: auto;
+      width: auto;
+    }
+
+    h1 {
+      font-size: 16pt;
+      font-weight: bold;
+      color: #2563eb;
+      border-bottom: 2px solid #2563eb;
+      padding-bottom: 8px;
+      margin-top: 10px;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+
+    h2 {
+      font-size: 13pt;
+      font-weight: bold;
+      color: #1e40af;
+      margin-top: 15px;
+      margin-bottom: 8px;
+    }
+
+    h3 {
+      font-size: 11pt;
+      font-weight: bold;
+      margin-top: 10px;
+      margin-bottom: 5px;
+    }
+
+    h4 {
+      font-size: 10pt;
+      font-weight: bold;
+      margin-top: 8px;
+      margin-bottom: 3px;
+    }
+
+    p {
+      margin: 8px 0;
+      text-align: justify;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 5px 0 10px 0;
+    }
+
+    td, th {
+      border: 1px solid #000;
+      padding: 5px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background-color: #e5e7eb;
+      font-weight: bold;
+    }
+
+    .photo-section {
+      page-break-before: always;
+      margin-top: 20px;
+    }
+
+    .photo-container {
+      page-break-before: always;
+      page-break-after: always;
+      margin: 0;
+      padding: 10px 0;
+    }
+
+    .photo-img {
+      width: 100%;
+      max-width: 100%;
+      max-height: 550px;
+      height: auto;
+      border: 1px solid #ccc;
+      margin: 5px 0;
+      object-fit: contain;
+    }
+
+    .map-container {
+      margin: 15px 0;
+      border: 1px solid #ddd;
+      padding: 10px;
+      background-color: #f9fafb;
+      page-break-inside: avoid;
+    }
+
+    .map-img {
+      width: 100%;
+      max-width: 600px;
+      height: auto;
+      border: 1px solid #ccc;
+      display: block;
+      margin: 10px auto;
+    }
+
+    .metadata {
+      font-size: 9pt;
+      color: #666;
+      margin: 3px 0;
+    }
+
+    .metadata p {
+      margin: 2px 0;
+    }
+
+    .severity-high {
+      color: #dc2626;
+      font-weight: bold;
+    }
+
+    .severity-medium {
+      color: #f59e0b;
+      font-weight: bold;
+    }
+
+    .severity-low {
+      color: #10b981;
+      font-weight: bold;
+    }
+
+    .footer {
+      margin-top: 40px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+      font-size: 9pt;
+      text-align: center;
+      color: #666;
+    }
+
+    .cover-page {
+      page-break-after: always;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      text-align: center;
+      position: relative;
+      padding: 40px 20px;
+    }
+
+    .cover-logos {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      right: 20px;
+      display: table;
+      width: calc(100% - 40px);
+    }
+
+    .cover-logo-left {
+      display: table-cell;
+      width: 50%;
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    .cover-logo-right {
+      display: table-cell;
+      width: 50%;
+      text-align: right;
+      vertical-align: middle;
+    }
+
+    .cover-logo-left img,
+    .cover-logo-right img {
+      max-height: 70px;
+      max-width: 200px;
+      height: auto;
+      width: auto;
+    }
+
+    .cover-content {
+      z-index: 1;
+      margin-top: 100px;
+    }
+
+    .cover-title {
+      font-size: 32pt;
+      font-weight: bold;
+      color: #1e40af;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+    }
+
+    .cover-subtitle {
+      font-size: 16pt;
+      color: #2563eb;
+      margin-bottom: 40px;
+    }
+
+    .cover-image {
+      width: 100%;
+      max-width: 600px;
+      max-height: 400px;
+      object-fit: cover;
+      border: 3px solid #2563eb;
+      border-radius: 8px;
+      margin: 30px auto;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .cover-info {
+      margin-top: 40px;
+      background-color: #f3f4f6;
+      padding: 20px;
+      border-radius: 8px;
+      max-width: 500px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .cover-info-row {
+      display: table;
+      width: 100%;
+      margin: 8px 0;
+      text-align: left;
+    }
+
+    .cover-info-label {
+      display: table-cell;
+      font-weight: bold;
+      color: #1e40af;
+      width: 40%;
+      padding: 5px 10px;
+    }
+
+    .cover-info-value {
+      display: table-cell;
+      color: #374151;
+      width: 60%;
+      padding: 5px 10px;
+    }
+
+    .cover-inspection-type {
+      font-size: 18pt;
+      font-weight: bold;
+      color: #059669;
+      margin: 20px 0;
+      text-transform: uppercase;
+    }
+  </style>
+  `
+}
+
+/**
  * Genera el contenido HTML del informe
  */
-function generateReportHTML(data: ReportData, logoBase64?: string): string {
-  const { projectData, images } = data
+export function generateReportHTML(data: ReportData, t: ReportTranslations): string {
+  const { projectData, images, rdtLogoBase64, clientLogoBase64, coverImageBase64 } = data
 
   // Calcular estadísticas generales
   const totalDetections = images.reduce((sum, img) => sum + img.detections.length, 0)
@@ -229,338 +423,632 @@ function generateReportHTML(data: ReportData, logoBase64?: string): string {
     })
   })
 
+  const avgConfidence = totalDetections > 0
+    ? (images.reduce((sum, img) => sum + img.detections.reduce((s, d) => s + d.confidence, 0), 0) / totalDetections * 100).toFixed(1)
+    : '0'
+
+  // Obtener imagen aérea de portada (usar coverImageBase64 o el primer mapa disponible)
+  const coverImage = coverImageBase64 || images.find(img => img.mapImageBase64)?.mapImageBase64
+
   return `
-    <div class="header">
-      ${logoBase64 ? `<img src="${logoBase64}" alt="IKUSKI Logo" class="logo">` : ''}
-      <h1>INFORME DE INSPECCIÓN</h1>
-      <h2>Detección de Corrosión mediante IA</h2>
+    <!-- PORTADA -->
+    <div class="cover-page">
+      <div class="cover-logos">
+        ${clientLogoBase64 ? `
+        <div class="cover-logo-left">
+          <img src="${clientLogoBase64}" alt="Client Logo">
+        </div>
+        ` : '<div class="cover-logo-left"></div>'}
+        ${rdtLogoBase64 ? `
+        <div class="cover-logo-right">
+          <img src="${rdtLogoBase64}" alt="RDT Logo">
+        </div>
+        ` : '<div class="cover-logo-right"></div>'}
+      </div>
+
+      <div class="cover-content">
+        <h1 class="cover-title">${t.coverTitle}</h1>
+        <p class="cover-subtitle">${t.coverSubtitle}</p>
+
+        <p class="cover-inspection-type">${t.coverInspectionType}</p>
+
+        ${coverImage ? `
+        <img src="${coverImage}" class="cover-image" alt="Vista aérea de la ubicación">
+        ` : ''}
+
+        <div class="cover-info">
+          ${projectData.location ? `
+          <div class="cover-info-row">
+            <div class="cover-info-label">${t.coverLocation}:</div>
+            <div class="cover-info-value">${projectData.location}</div>
+          </div>
+          ` : ''}
+          ${projectData.city ? `
+          <div class="cover-info-row">
+            <div class="cover-info-label">${t.coverCity}:</div>
+            <div class="cover-info-value">${projectData.city}</div>
+          </div>
+          ` : ''}
+          ${projectData.country ? `
+          <div class="cover-info-row">
+            <div class="cover-info-label">${t.coverCountry}:</div>
+            <div class="cover-info-value">${projectData.country}</div>
+          </div>
+          ` : ''}
+          <div class="cover-info-row">
+            <div class="cover-info-label">${t.coverDate}:</div>
+            <div class="cover-info-value">${new Date(projectData.inspectionDate).toLocaleDateString(data.language === 'en' ? 'en-US' : data.language === 'pt' ? 'pt-PT' : 'es-ES')}</div>
+          </div>
+          <div class="cover-info-row">
+            <div class="cover-info-label">${t.client}:</div>
+            <div class="cover-info-value">${projectData.client}</div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <h2>1. DATOS DEL PROYECTO</h2>
+    <!-- INICIO DEL INFORME - Segunda página -->
+    <div class="content-page">
+      <div class="page-header">
+        <div class="header-logos">
+          ${clientLogoBase64 ? `
+          <div class="header-logo-left">
+            <img src="${clientLogoBase64}" alt="Client Logo">
+          </div>
+          ` : '<div class="header-logo-left"></div>'}
+          ${rdtLogoBase64 ? `
+          <div class="header-logo-right">
+            <img src="${rdtLogoBase64}" alt="RDT Logo">
+          </div>
+          ` : '<div class="header-logo-right"></div>'}
+        </div>
+      </div>
+
+      <h1>${t.title}</h1>
+    <p style="text-align: center; font-size: 12pt; color: #666; margin-bottom: 20px; margin-top: 5px;">
+      ${t.subtitle}
+    </p>
+
+    <h2>1. ${t.projectData}</h2>
     <table>
       <tr>
-        <th width="30%">Campo</th>
-        <th width="70%">Valor</th>
+        <th width="30%">${t.projectName}</th>
+        <td width="70%">${projectData.projectName}</td>
       </tr>
       <tr>
-        <td>Nombre del Proyecto</td>
-        <td>${projectData.projectName}</td>
-      </tr>
-      <tr>
-        <td>Nº de Obra</td>
+        <th>${t.workNumber}</th>
         <td>${projectData.workNumber}</td>
       </tr>
       <tr>
-        <td>Nº de Pedido</td>
+        <th>${t.orderNumber}</th>
         <td>${projectData.orderNumber}</td>
       </tr>
       <tr>
-        <td>Cliente</td>
+        <th>${t.client}</th>
         <td>${projectData.client}</td>
       </tr>
       <tr>
-        <td>Localización</td>
+        <th>${t.location}</th>
         <td>${projectData.location}</td>
       </tr>
       <tr>
-        <td>Fecha de Inspección</td>
-        <td>${new Date(projectData.inspectionDate).toLocaleDateString('es-ES')}</td>
+        <th>${t.inspectionDate}</th>
+        <td>${new Date(projectData.inspectionDate).toLocaleDateString(data.language === 'en' ? 'en-US' : data.language === 'pt' ? 'pt-PT' : 'es-ES')}</td>
       </tr>
       <tr>
-        <td>Fecha del Informe</td>
-        <td>${new Date(projectData.reportDate).toLocaleDateString('es-ES')}</td>
+        <th>${t.reportDate}</th>
+        <td>${new Date(projectData.reportDate).toLocaleDateString(data.language === 'en' ? 'en-US' : data.language === 'pt' ? 'pt-PT' : 'es-ES')}</td>
       </tr>
       <tr>
-        <td>Elaborado por</td>
+        <th>${t.inspector}</th>
         <td>${projectData.inspector}</td>
       </tr>
       <tr>
-        <td>Revisado por</td>
+        <th>${t.reviewer}</th>
         <td>${projectData.reviewer}</td>
       </tr>
     </table>
 
-    <h2>2. RESUMEN EJECUTIVO</h2>
-    <p>
-      Se realizó una inspección mediante captura aérea con dron de la estructura ubicada en ${projectData.location}.
-      Las imágenes capturadas fueron procesadas mediante sistema de visión artificial para detectar automáticamente
-      áreas con presencia de corrosión.
+    ${projectData.introduction ? `
+    <h2>2. ${t.introduction}</h2>
+    <p style="line-height: 1.6;">
+      ${projectData.introduction.replace(/\n/g, '<br>')}
     </p>
+    ` : ''}
 
-    <h3>2.1 Resultados Generales</h3>
+    <h2>${projectData.introduction ? '3' : '2'}. ${t.technicalSummary}</h2>
     <table>
       <tr>
-        <th>Total de Imágenes Analizadas</th>
-        <td>${images.length}</td>
-      </tr>
-      <tr>
-        <th>Total de Detecciones</th>
+        <th>${t.totalDetections}</th>
         <td>${totalDetections}</td>
       </tr>
       <tr>
-        <th class="severity-high">Severidad Alta</th>
-        <td class="severity-high">${severityCounts.alto} (${((severityCounts.alto / totalDetections) * 100).toFixed(1)}%)</td>
+        <th class="severity-high">${t.highSeverity}</th>
+        <td class="severity-high">${severityCounts.alto} (${totalDetections > 0 ? ((severityCounts.alto / totalDetections) * 100).toFixed(1) : '0'}%)</td>
       </tr>
       <tr>
-        <th class="severity-medium">Severidad Media</th>
-        <td class="severity-medium">${severityCounts.medio} (${((severityCounts.medio / totalDetections) * 100).toFixed(1)}%)</td>
+        <th class="severity-medium">${t.mediumSeverity}</th>
+        <td class="severity-medium">${severityCounts.medio} (${totalDetections > 0 ? ((severityCounts.medio / totalDetections) * 100).toFixed(1) : '0'}%)</td>
       </tr>
       <tr>
-        <th class="severity-low">Severidad Baja</th>
-        <td class="severity-low">${severityCounts.bajo} (${((severityCounts.bajo / totalDetections) * 100).toFixed(1)}%)</td>
+        <th class="severity-low">${t.lowSeverity}</th>
+        <td class="severity-low">${severityCounts.bajo} (${totalDetections > 0 ? ((severityCounts.bajo / totalDetections) * 100).toFixed(1) : '0'}%)</td>
+      </tr>
+      <tr>
+        <th>${t.avgConfidence}</th>
+        <td>${avgConfidence}%</td>
       </tr>
     </table>
 
     <div class="photo-section">
-      <h2>3. ANEXO FOTOGRÁFICO Y ANÁLISIS DETALLADO</h2>
+      <h2>${projectData.introduction ? '4' : '3'}. ${t.photographic} ${t.annex}</h2>
       ${images.map((img, index) => `
         <div class="photo-container">
-          <h3>Fotografía ${index + 1}: ${img.filename}</h3>
+          <h3>${t.photo} ${index + 1}: ${img.filename}</h3>
 
-          <img src="${img.url}" class="photo-img" alt="Fotografía ${index + 1}">
+          <img src="${img.urlWithBoxes || img.url}" class="photo-img" alt="${t.photo} ${index + 1}">
 
           <div class="metadata">
-            <p><strong>Coordenadas GPS:</strong> ${formatGPSCoordinates(img.gps.latitude, img.gps.longitude, img.gps.altitude)}</p>
-            <p><strong>Fecha y Hora:</strong> ${img.timestamp}</p>
+            <p><strong>${t.gpsCoordinates}:</strong> ${formatGPSCoordinates(img.gps.latitude, img.gps.longitude, img.gps.altitude)}</p>
+            <p><strong>${data.language === 'en' ? 'Date and Time' : data.language === 'pt' ? 'Data e Hora' : 'Fecha y Hora'}:</strong> ${img.timestamp}</p>
           </div>
 
           ${isValidGPSCoordinates(img.gps.latitude, img.gps.longitude) && img.mapImageBase64 ? `
           <div class="map-container">
-            <h4>📍 Ubicación Geográfica</h4>
+            <h4>📍 ${data.language === 'en' ? 'Geographic Location' : data.language === 'pt' ? 'Localização Geográfica' : 'Ubicación Geográfica'}</h4>
             <img
               src="${img.mapImageBase64}"
               class="map-img"
-              alt="Mapa de ubicación"
+              alt="${data.language === 'en' ? 'Location map' : data.language === 'pt' ? 'Mapa de localização' : 'Mapa de ubicación'}"
             >
-            <div style="text-align: center; margin-top: 8px;">
-              <a
-                href="${getOpenStreetMapUrl(img.gps.latitude, img.gps.longitude)}"
-                target="_blank"
-                class="map-link"
-                style="margin-right: 15px;"
-              >
-                🗺️ Abrir en OpenStreetMap
-              </a>
-              <a
-                href="${getGoogleMapsUrl(img.gps.latitude, img.gps.longitude)}"
-                target="_blank"
-                class="map-link"
-              >
-                🌍 Abrir en Google Maps
-              </a>
-            </div>
             <p style="text-align: center; font-size: 9pt; color: #666; margin-top: 5px;">
-              Coordenadas: ${img.gps.latitude}, ${img.gps.longitude}
+              ${t.gpsCoordinates}: ${img.gps.latitude}, ${img.gps.longitude}
             </p>
           </div>
           ` : ''}
 
-          <h4>Detecciones:</h4>
+          <h4>${t.detectedAreas}:</h4>
           <table>
             <tr>
-              <th>Total Detecciones</th>
-              <th>Alta</th>
-              <th>Media</th>
-              <th>Baja</th>
+              <th>${t.detectionNumber}</th>
+              <th>${t.severity}</th>
+              <th>${t.confidence}</th>
             </tr>
+            ${img.detections.map((det, detIndex) => `
             <tr>
-              <td>${img.detections.length}</td>
-              <td class="severity-high">${img.detections.filter(d => d.severity === 'alto').length}</td>
-              <td class="severity-medium">${img.detections.filter(d => d.severity === 'medio').length}</td>
-              <td class="severity-low">${img.detections.filter(d => d.severity === 'bajo').length}</td>
+              <td>${detIndex + 1}</td>
+              <td class="severity-${det.severity === 'alto' ? 'high' : det.severity === 'medio' ? 'medium' : 'low'}">
+                ${det.severity === 'alto' ? t.extensive : det.severity === 'medio' ? t.moderate : t.slight}
+              </td>
+              <td>${(det.confidence * 100).toFixed(1)}%</td>
             </tr>
+            `).join('')}
           </table>
 
-          <h4>Análisis Técnico:</h4>
-          <p>${img.analysis || 'Sin análisis generado'}</p>
+          <h4>${t.technicalAnalysis}</h4>
+          <p>${img.analysis || t.noAnalysisGenerated}</p>
         </div>
       `).join('')}
     </div>
 
-    <h2>4. CONCLUSIONES Y RECOMENDACIONES</h2>
+    <h2>${projectData.introduction ? '5' : '4'}. ${t.conclusions}</h2>
     <p>
       ${severityCounts.alto > 0
-        ? `Se identificaron ${severityCounts.alto} área(s) de severidad alta que requieren intervención inmediata.`
-        : 'No se identificaron áreas de severidad alta.'}
+        ? `${data.language === 'en' ? 'Identified' : data.language === 'pt' ? 'Identificaram-se' : 'Se identificaron'} ${severityCounts.alto} ${t.highAreasFound}`
+        : t.highAreasNotFound}
     </p>
+    ${severityCounts.medio > 0 ? `
     <p>
-      ${severityCounts.medio > 0
-        ? `Se detectaron ${severityCounts.medio} área(s) de severidad media, recomendándose planificar mantenimiento preventivo.`
-        : ''}
+      ${data.language === 'en' ? 'Detected' : data.language === 'pt' ? 'Detectaram-se' : 'Se detectaron'} ${severityCounts.medio} ${t.mediumAreasFound}
     </p>
+    ` : ''}
     <p>
-      Se recomienda realizar inspecciones periódicas mediante dron para monitorear la evolución de las áreas afectadas.
+      ${t.periodicInspection}
     </p>
 
     <div class="footer">
-      <p>Generado por IKUSKI - Sistema de Detección de Corrosión mediante IA</p>
-      <p>Fecha de generación: ${new Date().toLocaleDateString('es-ES')} - ${new Date().toLocaleTimeString('es-ES')}</p>
+      <p>${t.generatedBy}</p>
+      <p>${t.generationDate}: ${new Date().toLocaleDateString(data.language === 'en' ? 'en-US' : data.language === 'pt' ? 'pt-PT' : 'es-ES')} - ${new Date().toLocaleTimeString(data.language === 'en' ? 'en-US' : data.language === 'pt' ? 'pt-PT' : 'es-ES')}</p>
     </div>
+    </div><!-- Cierre de content-page -->
   `
 }
 
 /**
  * Abre el diálogo de impresión del navegador
  */
-export function printReport(data: ReportData, logoBase64?: string): void {
+export function printReport(data: ReportData, existingWindow?: Window | null): void {
   try {
-    // Crear una ventana nueva para imprimir
-    const printWindow = window.open('', '_blank')
+    const language = data.language || 'es'
+    const t = getTranslations(language)
+
+    const printWindow = existingWindow || window.open('', '_blank', 'width=800,height=600')
 
     if (!printWindow) {
-      throw new Error('No se pudo abrir la ventana de impresión. Verifica que no esté bloqueada por el navegador.')
+      throw new Error('No se pudo abrir la ventana de impresión.')
     }
 
-    const htmlContent = generateReportHTML(data, logoBase64)
+    const loadingText = language === 'en' ? 'Generating inspection report...' : language === 'pt' ? 'Gerando relatório de inspeção...' : 'Generando informe de inspección...'
+    const processingText = language === 'en' ? 'Processing' : language === 'pt' ? 'Processando' : 'Procesando'
+    const imagesText = language === 'en' ? 'images with bounding boxes' : language === 'pt' ? 'imagens com caixas delimitadoras' : 'imágenes con bounding boxes'
+    const waitText = language === 'en' ? 'Please wait, this may take a few moments.' : language === 'pt' ? 'Por favor aguarde, isto pode demorar alguns momentos.' : 'Por favor espera, esto puede tomar unos momentos.'
 
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8">
-        <title>Informe de Inspección - ${data.projectData.projectName}</title>
+        <title>${loadingText}</title>
         <style>
-          @media print {
-            @page {
-              size: A4;
-              margin: 2cm;
-            }
-            body {
-              font-family: Arial, sans-serif;
-              font-size: 10pt;
-              line-height: 1.4;
-            }
-            .photo-section {
-              page-break-before: always;
-            }
-            .photo-container {
-              page-break-inside: avoid;
-              margin-bottom: 30px;
-            }
-          }
           body {
             font-family: Arial, sans-serif;
-            font-size: 11pt;
-            line-height: 1.5;
-            margin: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: #f3f4f6;
           }
-          h1 {
-            font-size: 18pt;
-            font-weight: bold;
-            color: #2563eb;
-            border-bottom: 2px solid #2563eb;
-            padding-bottom: 10px;
-            margin-top: 20px;
+          .loader { text-align: center; }
+          .spinner {
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #2563eb;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
           }
-          h2 {
-            font-size: 14pt;
-            font-weight: bold;
-            color: #1e40af;
-            margin-top: 15px;
-          }
-          h3 {
-            font-size: 12pt;
-            font-weight: bold;
-            margin-top: 10px;
-          }
-          h4 {
-            font-size: 11pt;
-            font-weight: bold;
-            margin-top: 8px;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 10px 0;
-          }
-          td, th {
-            border: 1px solid #000;
-            padding: 8px;
-            text-align: left;
-          }
-          th {
-            background-color: #e5e7eb;
-            font-weight: bold;
-          }
-          .header {
-            text-align: center;
-            margin-bottom: 30px;
-          }
-          .photo-img {
-            width: 100%;
-            max-width: 100%;
-            height: auto;
-            border: 1px solid #ccc;
-            margin: 10px 0;
-          }
-          .map-container {
-            margin: 15px 0;
-            border: 1px solid #ddd;
-            padding: 10px;
-            background-color: #f9fafb;
-            page-break-inside: avoid;
-          }
-          .map-img {
-            width: 100%;
-            max-width: 600px;
-            height: auto;
-            border: 1px solid #ccc;
-            display: block;
-            margin: 10px auto;
-          }
-          .map-link {
-            display: block;
-            text-align: center;
-            color: #2563eb;
-            text-decoration: none;
-            font-size: 10pt;
-            margin-top: 5px;
-            font-weight: bold;
-          }
-          .metadata {
-            font-size: 9pt;
-            color: #666;
-            margin: 5px 0;
-          }
-          .severity-high {
-            color: #dc2626;
-            font-weight: bold;
-          }
-          .severity-medium {
-            color: #f59e0b;
-            font-weight: bold;
-          }
-          .severity-low {
-            color: #10b981;
-            font-weight: bold;
-          }
-          .footer {
-            margin-top: 40px;
-            border-top: 1px solid #ccc;
-            padding-top: 10px;
-            font-size: 9pt;
-            text-align: center;
-            color: #666;
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
           }
         </style>
       </head>
       <body>
-        ${htmlContent}
+        <div class="loader">
+          <div class="spinner"></div>
+          <h2>${loadingText}</h2>
+          <p>${processingText} ${data.images.length} ${imagesText}</p>
+          <p>${waitText}</p>
+        </div>
       </body>
       </html>
     `)
 
-    printWindow.document.close()
+    const htmlContent = generateReportHTML(data, t)
 
-    // Esperar a que se carguen las imágenes antes de imprimir
-    printWindow.onload = function() {
-      setTimeout(() => {
-        printWindow.print()
-      }, 500)
-    }
+    setTimeout(() => {
+      printWindow.document.open()
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>${t.title} - ${data.projectData.projectName}</title>
+          ${generatePrintStyles()}
+        </head>
+        <body>
+          ${htmlContent}
+        </body>
+        </html>
+      `)
+      printWindow.document.close()
+
+      const imageCount = data.images.length
+      const loadTime = Math.min(imageCount * 100, 5000)
+
+      printWindow.onload = function() {
+        setTimeout(() => {
+          printWindow.print()
+          printWindow.onafterprint = function() {
+            printWindow.close()
+          }
+        }, loadTime)
+      }
+    }, 100)
 
   } catch (error) {
     console.error('Error printing report:', error)
     throw new Error('No se pudo imprimir el informe')
   }
+}
+
+/**
+ * Genera estilos específicos para impresión
+ */
+function generatePrintStyles(): string {
+  return `
+  <style>
+    @media print {
+      @page {
+        size: A4;
+        margin: 3cm 2cm 2cm 2cm;
+      }
+      body {
+        font-family: Calibri, Arial, sans-serif;
+        font-size: 10pt;
+        line-height: 1.4;
+      }
+      /* Ocultar los logos integrados de la portada en impresión */
+      .cover-page .cover-logos {
+        display: none !important;
+      }
+      .cover-page {
+        page-break-after: always;
+      }
+      /* Ocultar el encabezado dentro de content-page para evitar duplicados */
+      .content-page .page-header {
+        display: none !important;
+      }
+      .photo-section {
+        page-break-before: always;
+      }
+      .photo-container {
+        page-break-inside: avoid;
+        margin-bottom: 30px;
+      }
+    }
+
+    body {
+      font-family: Calibri, Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.5;
+      margin: 20px;
+    }
+
+    .header-logos {
+      display: table;
+      width: 100%;
+    }
+
+    .header-logo-left {
+      display: table-cell;
+      width: 50%;
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    .header-logo-right {
+      display: table-cell;
+      width: 50%;
+      text-align: right;
+      vertical-align: middle;
+    }
+
+    .header-logo-left img,
+    .header-logo-right img {
+      max-height: 60px;
+      max-width: 150px;
+      height: auto;
+      width: auto;
+    }
+
+    h1 {
+      font-size: 18pt;
+      font-weight: bold;
+      color: #2563eb;
+      border-bottom: 2px solid #2563eb;
+      padding-bottom: 10px;
+      margin-top: 20px;
+      text-align: center;
+    }
+
+    h2 {
+      font-size: 14pt;
+      font-weight: bold;
+      color: #1e40af;
+      margin-top: 15px;
+    }
+
+    h3 {
+      font-size: 12pt;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+
+    h4 {
+      font-size: 11pt;
+      font-weight: bold;
+      margin-top: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0;
+    }
+
+    td, th {
+      border: 1px solid #000;
+      padding: 8px;
+      text-align: left;
+    }
+
+    th {
+      background-color: #e5e7eb;
+      font-weight: bold;
+    }
+
+    .photo-img {
+      width: 100%;
+      max-width: 100%;
+      max-height: 550px;
+      height: auto;
+      border: 1px solid #ccc;
+      margin: 5px 0;
+      object-fit: contain;
+    }
+
+    .map-container {
+      margin: 15px 0;
+      border: 1px solid #ddd;
+      padding: 10px;
+      background-color: #f9fafb;
+      page-break-inside: avoid;
+    }
+
+    .map-img {
+      width: 100%;
+      max-width: 600px;
+      height: auto;
+      border: 1px solid #ccc;
+      display: block;
+      margin: 10px auto;
+    }
+
+    .metadata {
+      font-size: 9pt;
+      color: #666;
+      margin: 3px 0;
+    }
+
+    .metadata p {
+      margin: 2px 0;
+    }
+
+    .severity-high {
+      color: #dc2626;
+      font-weight: bold;
+    }
+
+    .severity-medium {
+      color: #f59e0b;
+      font-weight: bold;
+    }
+
+    .severity-low {
+      color: #10b981;
+      font-weight: bold;
+    }
+
+    .footer {
+      margin-top: 40px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+      font-size: 9pt;
+      text-align: center;
+      color: #666;
+    }
+
+    /* Estilos para la portada */
+    .cover-page {
+      page-break-after: always;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      text-align: center;
+      position: relative;
+      padding: 40px 20px;
+    }
+
+    .cover-logos {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      right: 20px;
+      display: table;
+      width: calc(100% - 40px);
+    }
+
+    .cover-logo-left {
+      display: table-cell;
+      width: 50%;
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    .cover-logo-right {
+      display: table-cell;
+      width: 50%;
+      text-align: right;
+      vertical-align: middle;
+    }
+
+    .cover-logo-left img,
+    .cover-logo-right img {
+      max-height: 70px;
+      max-width: 200px;
+      height: auto;
+      width: auto;
+    }
+
+    .cover-content {
+      z-index: 1;
+      margin-top: 100px;
+    }
+
+    .cover-title {
+      font-size: 32pt;
+      font-weight: bold;
+      color: #1e40af;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      border-bottom: none;
+    }
+
+    .cover-subtitle {
+      font-size: 16pt;
+      color: #2563eb;
+      margin-bottom: 40px;
+    }
+
+    .cover-inspection-type {
+      font-size: 18pt;
+      font-weight: bold;
+      color: #059669;
+      margin: 20px 0;
+      text-transform: uppercase;
+    }
+
+    .cover-image {
+      width: 100%;
+      max-width: 600px;
+      max-height: 400px;
+      object-fit: cover;
+      border: 3px solid #2563eb;
+      border-radius: 8px;
+      margin: 30px auto;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .cover-info {
+      margin-top: 40px;
+      background-color: #f3f4f6;
+      padding: 20px;
+      border-radius: 8px;
+      max-width: 500px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .cover-info-row {
+      display: table;
+      width: 100%;
+      margin: 8px 0;
+      text-align: left;
+    }
+
+    .cover-info-label {
+      display: table-cell;
+      font-weight: bold;
+      color: #1e40af;
+      width: 40%;
+      padding: 5px 10px;
+    }
+
+    .cover-info-value {
+      display: table-cell;
+      color: #374151;
+      width: 60%;
+      padding: 5px 10px;
+    }
+
+    .content-page {
+      page-break-before: auto;
+    }
+  </style>
+  `
 }

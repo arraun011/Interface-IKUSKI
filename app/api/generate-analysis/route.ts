@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server'
+import { getTranslations } from '@/lib/report-translations'
 
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { detections, severityCounts, avgConfidence } = body
+    const { detections, severityCounts, avgConfidence, imageBase64, language = 'es' } = body
+
+    const t = getTranslations(language as 'es' | 'en' | 'pt')
 
     // Obtener API key de variables de entorno
     const openaiApiKey = process.env.OPENAI_API_KEY
@@ -13,27 +16,58 @@ export async function POST(request: Request) {
       throw new Error('OpenAI API key not configured')
     }
 
-    console.log('Generating analysis with OpenAI...')
+    console.log('Generating analysis with OpenAI Vision...')
     console.log('Detections:', detections)
     console.log('Severity counts:', severityCounts)
+    console.log('Has image:', !!imageBase64)
 
-    // Preparar prompt para ChatGPT
-    const userPrompt = `Genera un análisis técnico profesional basado en los siguientes datos de inspección de una estructura metálica:
+    if (imageBase64) {
+      const sizeInKB = Math.round(imageBase64.length / 1024)
+      console.log(`Image Base64 size: ${sizeInKB} KB`)
 
-- Total de áreas con corrosión detectadas: ${detections}
-- Severidad alta: ${severityCounts.alto} área(s)
-- Severidad media: ${severityCounts.medio} área(s)
-- Severidad baja: ${severityCounts.bajo} área(s)
-- Confianza promedio del modelo: ${(avgConfidence * 100).toFixed(1)}%
+      if (sizeInKB > 5000) {
+        console.warn(`⚠️  Large image detected (${sizeInKB} KB). This may cause issues with OpenAI API.`)
+      }
+    }
 
-Proporciona un análisis técnico conciso (máximo 4-5 líneas) que incluya:
-1. Evaluación del estado general
-2. Áreas críticas que requieren atención inmediata
-3. Recomendaciones específicas
+    // Preparar prompt para ChatGPT con visión usando traducciones
+    const textPrompt = t.aiUserPromptTemplate.replace('{detections}', detections.toString())
 
-El análisis debe ser profesional, técnico y orientado a la acción.`
+    // Construir mensajes con o sin imagen según disponibilidad
+    const messages: any[] = [
+      {
+        role: 'system',
+        content: t.aiSystemPrompt
+      }
+    ]
 
-    // Llamar a la API de OpenAI usando Chat Completions
+    // Si hay imagen en base64, usar el modelo de visión
+    if (imageBase64) {
+      messages.push({
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: textPrompt
+          },
+          {
+            type: 'image_url',
+            image_url: {
+              url: imageBase64,
+              detail: 'high'
+            }
+          }
+        ]
+      })
+    } else {
+      // Sin imagen, usar solo texto
+      messages.push({
+        role: 'user',
+        content: textPrompt
+      })
+    }
+
+    // Llamar a la API de OpenAI usando Chat Completions con Vision
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -41,26 +75,26 @@ El análisis debe ser profesional, técnico y orientado a la acción.`
         'Authorization': `Bearer ${openaiApiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: 'Eres un ingeniero experto en inspección de estructuras metálicas y análisis de corrosión. Tus respuestas son técnicas, precisas y orientadas a la acción.'
-          },
-          {
-            role: 'user',
-            content: userPrompt
-          }
-        ],
+        model: imageBase64 ? 'gpt-4o-mini' : 'gpt-4o-mini', // gpt-4o-mini soporta visión
+        messages,
         temperature: 0.7,
-        max_tokens: 300
+        max_tokens: 400
       })
     })
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }))
-      console.error('OpenAI API Error Response:', JSON.stringify(errorData, null, 2))
-      throw new Error(`OpenAI API error: ${errorData.error?.message || response.statusText}`)
+      const errorText = await response.text()
+      console.error('OpenAI API Error Status:', response.status)
+      console.error('OpenAI API Error Response:', errorText)
+
+      let errorData
+      try {
+        errorData = JSON.parse(errorText)
+      } catch {
+        errorData = { error: { message: errorText } }
+      }
+
+      throw new Error(`OpenAI API error (${response.status}): ${errorData.error?.message || response.statusText}`)
     }
 
     const data = await response.json()

@@ -43,11 +43,14 @@ export async function drawBoxesOnImage(
 
         // Dibujar cada bounding box
         boxes.forEach(box => {
+          // Detectar si las coordenadas están normalizadas (0-1) o en píxeles
+          const isNormalized = box.x <= 1 && box.y <= 1 && box.w <= 1 && box.h <= 1
+
           // Calcular coordenadas en píxeles
-          const x = box.x * img.width
-          const y = box.y * img.height
-          const w = box.w * img.width
-          const h = box.h * img.height
+          const x = isNormalized ? box.x * img.width : box.x
+          const y = isNormalized ? box.y * img.height : box.y
+          const w = isNormalized ? box.w * img.width : box.w
+          const h = isNormalized ? box.h * img.height : box.h
 
           // Determinar color según severidad
           let color = '#10b981' // verde (bajo)
