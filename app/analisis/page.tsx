@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
 import { Badge } from "@/components/ui/badge"
-import { Upload, Download, Play, Filter, ImageIcon, Folder, FolderOpen, CheckCircle2, X, Copy, Save, FileDown, FileUp, BookOpen, BookMarked } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Upload, Download, Play, Filter, ImageIcon, Folder, FolderOpen, CheckCircle2, X, Copy, Save, FileDown, FileUp, BookOpen, BookMarked, Search } from "lucide-react"
 import { useState, useRef, useEffect } from "react"
 import { useToast } from "@/hooks/use-toast"
 import { ImageGallery } from "@/components/image-gallery"
@@ -62,6 +64,9 @@ export default function AnalisisPage() {
   const [showSessionDialog, setShowSessionDialog] = useState(false)
   const [sessionDialogMode, setSessionDialogMode] = useState<'save' | 'load'>('save')
   const [pendingSessionImport, setPendingSessionImport] = useState<AnalysisSessionExport | null>(null)
+  const [showSearchDialog, setShowSearchDialog] = useState(false)
+  const [fileNamesInput, setFileNamesInput] = useState('')
+  const [isSearching, setIsSearching] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { toast } = useToast()
@@ -790,6 +795,136 @@ export default function AnalisisPage() {
     input.click()
   }
 
+  // Buscar archivos por nombre en carpetas seleccionadas
+  const handleSearchFiles = async () => {
+    if (!fileNamesInput.trim()) {
+      toast({
+        title: "Lista Vacía",
+        description: "Ingresa al menos un nombre de archivo",
+        variant: "destructive"
+      })
+      return
+    }
+
+    // Parsear nombres de archivos (separados por ;)
+    const fileNames = fileNamesInput
+      .split(';')
+      .map(name => name.trim())
+      .filter(name => name.length > 0)
+
+    if (fileNames.length === 0) {
+      toast({
+        title: "Lista Vacía",
+        description: "No se encontraron nombres de archivo válidos",
+        variant: "destructive"
+      })
+      return
+    }
+
+    // Abrir selector de MÚLTIPLES CARPETAS
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.webkitdirectory = true
+    input.multiple = true // Permite seleccionar múltiples carpetas
+
+    input.onchange = async (e: any) => {
+      const files = Array.from(e.target.files) as File[]
+      if (files.length === 0) return
+
+      setIsSearching(true)
+      setShowSearchDialog(false)
+
+      try {
+        // Crear un Set de nombres de archivos a buscar (case-insensitive)
+        const searchSet = new Set(fileNames.map(name => name.toLowerCase()))
+
+        // Buscar archivos que coincidan
+        const matchedFiles: File[] = []
+        const foundNames = new Set<string>()
+
+        files.forEach(file => {
+          const fileName = file.name.toLowerCase()
+
+          // Buscar coincidencia exacta
+          if (searchSet.has(fileName)) {
+            matchedFiles.push(file)
+            foundNames.add(file.name)
+          }
+        })
+
+        if (matchedFiles.length === 0) {
+          toast({
+            title: "No se Encontraron Archivos",
+            description: `No se encontró ninguno de los ${fileNames.length} archivos especificados en las carpetas seleccionadas`,
+            variant: "destructive",
+            duration: 8000
+          })
+          setIsSearching(false)
+          return
+        }
+
+        // Cargar imágenes encontradas
+        const newImages: ImageItem[] = []
+        for (const file of matchedFiles) {
+          const reader = new FileReader()
+          await new Promise((resolve) => {
+            reader.onload = (event) => {
+              const id = `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+              const sizeInKB = (file.size / 1024).toFixed(2)
+              const relativePath = (file as any).webkitRelativePath || file.name
+
+              newImages.push({
+                id,
+                url: event.target?.result as string,
+                filename: file.name,
+                filePath: relativePath,
+                size: `${sizeInKB} KB`,
+                timestamp: new Date().toLocaleString('es-ES', {
+                  year: 'numeric',
+                  month: '2-digit',
+                  day: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })
+              })
+              resolve(null)
+            }
+            reader.readAsDataURL(file)
+          })
+        }
+
+        // Agregar imágenes al contexto
+        addImages(newImages)
+
+        // Mostrar resumen
+        const notFound = fileNames.filter(name =>
+          !Array.from(foundNames).some(found => found.toLowerCase() === name.toLowerCase())
+        )
+
+        toast({
+          title: "Búsqueda Completada",
+          description: `Se encontraron ${matchedFiles.length} de ${fileNames.length} archivos. ${notFound.length > 0 ? `No encontrados: ${notFound.length}` : 'Todos encontrados ✓'}`,
+          duration: 8000
+        })
+
+        if (notFound.length > 0) {
+          console.log('[Search] Archivos no encontrados:', notFound)
+        }
+
+      } catch (error: any) {
+        toast({
+          title: "Error en la Búsqueda",
+          description: error.message,
+          variant: "destructive"
+        })
+      } finally {
+        setIsSearching(false)
+      }
+    }
+
+    input.click()
+  }
+
   return (
     <div className="flex h-screen bg-background">
       <SidebarNav />
@@ -864,6 +999,16 @@ export default function AnalisisPage() {
             >
               <BookOpen className="mr-2 h-4 w-4" />
               Cargar Biblioteca
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowSearchDialog(true)}
+              disabled={isSearching}
+              title="Buscar archivos específicos en carpetas seleccionadas"
+            >
+              <Search className="mr-2 h-4 w-4" />
+              {isSearching ? "Buscando..." : "Buscar Archivos"}
             </Button>
           </div>
 
@@ -1253,6 +1398,51 @@ export default function AnalisisPage() {
           </Card>
         </div>
       )}
+
+      {/* Dialog de búsqueda de archivos */}
+      <Dialog open={showSearchDialog} onOpenChange={setShowSearchDialog}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Buscar Archivos Específicos</DialogTitle>
+            <DialogDescription>
+              Ingresa una lista de nombres de archivos (con extensión) separados por punto y coma (;).
+              Luego selecciona las carpetas raíz donde buscar.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Lista de archivos (separados por ;)
+              </label>
+              <Textarea
+                placeholder="ejemplo: foto1.jpg;imagen2.png;DJI_20251015120029_0040_D.JPG;archivo.jpg"
+                value={fileNamesInput}
+                onChange={(e) => setFileNamesInput(e.target.value)}
+                rows={6}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Ejemplo: foto1.jpg;imagen2.png;archivo3.jpg
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSearchDialog(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSearchFiles}
+              disabled={!fileNamesInput.trim()}
+            >
+              <Search className="mr-2 h-4 w-4" />
+              Buscar en Carpetas
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
