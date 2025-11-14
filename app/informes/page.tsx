@@ -16,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { FileText, Download, Eye, Sparkles, MapPin, Image as ImageIcon, Printer, Save, FolderOpen, Edit, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, AlignJustify, List, ListOrdered, Undo, Redo, Type } from "lucide-react"
+import { FileText, Download, Eye, Sparkles, MapPin, Image as ImageIcon, Printer, Save, FolderOpen, Edit, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, AlignJustify, List, ListOrdered, Undo, Redo, Type, BookMarked, BookOpen } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useAnalysisState } from "@/contexts/analysis-context"
 import { useToast } from "@/hooks/use-toast"
@@ -30,6 +30,7 @@ import { getStaticMapImageUrl, getStaticMapBase64, getStaticMapProxyUrl, getOpen
 import { SessionManager } from "@/components/session-manager"
 import { saveReportDraft, loadReportDraft } from "@/lib/session-storage"
 import { GooglePlacesAutocomplete } from "@/components/google-places-autocomplete"
+import { exportLibraryToJSON, importLibraryFromJSON, reconstructLibraryFromFiles, loadImagesFromLibrary } from "@/lib/library-storage"
 
 // Interfaz para datos GPS
 interface GPSData {
@@ -928,6 +929,74 @@ export default function InformesPage() {
     }
   }
 
+  // Exportar biblioteca a JSON (modo completo con base64)
+  const handleExportLibrary = async () => {
+    try {
+      // Exportar todas las imágenes cargadas (no solo las marcadas)
+      await exportLibraryToJSON(loadedImages, markedForReport, 'full')
+      toast({
+        title: "Biblioteca Exportada (Completa)",
+        description: `Se exportaron ${loadedImages.length} imágenes con datos completos en base64. El archivo puede ser grande pero es totalmente portable.`,
+        duration: 8000
+      })
+    } catch (error: any) {
+      toast({
+        title: "Error al Exportar",
+        description: error.message,
+        variant: "destructive"
+      })
+    }
+  }
+
+  // Importar biblioteca desde JSON
+  const handleImportLibrary = async () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json'
+    input.onchange = async (e: any) => {
+      const file = e.target.files?.[0]
+      if (!file) return
+
+      try {
+        const libraryData = await importLibraryFromJSON(file)
+
+        toast({
+          title: "Biblioteca Cargada",
+          description: `${libraryData.images.length} imágenes encontradas. Modo: ${libraryData.mode === 'full' ? 'Completo (con imágenes)' : 'Solo metadatos'}`,
+          duration: 5000
+        })
+
+        // Cargar imágenes según el modo
+        const { images: loadedImgs, markedIds, needsFileSelection } = await loadImagesFromLibrary(libraryData)
+
+        if (!needsFileSelection) {
+          // Modo 'full': cargar imágenes directamente desde base64
+          // Nota: En Informes no tenemos addImages, así que informamos al usuario
+          toast({
+            title: "Biblioteca Restaurada",
+            description: `Se encontraron ${loadedImgs.length} imágenes desde el archivo. Ve a la página de Análisis para cargar imágenes.`,
+            duration: 8000
+          })
+        } else {
+          // Modo 'metadata': requiere selección de archivos
+          toast({
+            title: "Modo Metadatos",
+            description: "Este archivo requiere que vayas a Análisis y uses 'Cargar Carpeta' para seleccionar las imágenes.",
+            duration: 10000
+          })
+        }
+
+      } catch (error: any) {
+        toast({
+          title: "Error al Importar",
+          description: error.message,
+          variant: "destructive"
+        })
+      }
+    }
+    input.click()
+  }
+
   return (
     <div className="flex h-screen bg-background">
       <SidebarNav />
@@ -964,6 +1033,27 @@ export default function InformesPage() {
               <FolderOpen className="mr-2 h-4 w-4" />
               Cargar Borrador
             </Button>
+            <div className="h-6 w-px bg-border mx-2" />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportLibrary}
+              disabled={loadedImages.length === 0}
+              title="Guardar biblioteca de imágenes con rutas y selección"
+            >
+              <BookMarked className="mr-2 h-4 w-4" />
+              Guardar Biblioteca
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleImportLibrary}
+              title="Cargar biblioteca guardada previamente"
+            >
+              <BookOpen className="mr-2 h-4 w-4" />
+              Cargar Biblioteca
+            </Button>
+            <div className="h-6 w-px bg-border mx-2" />
             <Button
               variant="outline"
               size="sm"
