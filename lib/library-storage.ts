@@ -9,21 +9,25 @@ export interface LibraryImageData {
   size?: string
   timestamp?: string
   markedForReport: boolean
+  imageData?: string // Base64 de la imagen para persistencia completa
 }
 
 export interface LibraryData {
   version: string
   savedAt: string
   instructions: string
+  mode: 'metadata' | 'full' // 'metadata' = solo rutas, 'full' = con imágenes base64
   images: LibraryImageData[]
 }
 
 /**
  * Exporta la biblioteca de imágenes a un archivo JSON
+ * @param mode 'metadata' = solo rutas (ligero), 'full' = con imágenes base64 (pesado pero portable)
  */
 export async function exportLibraryToJSON(
-  images: Array<{ id: string; filename: string; filePath?: string; size?: string; timestamp?: string }>,
-  markedForReport: string[]
+  images: Array<{ id: string; filename: string; filePath?: string; size?: string; timestamp?: string; url?: string }>,
+  markedForReport: string[],
+  mode: 'metadata' | 'full' = 'full'
 ): Promise<void> {
   // Agrupar imágenes por carpeta (extraer directorio de filePath)
   const folders = new Set<string>()
@@ -36,7 +40,9 @@ export async function exportLibraryToJSON(
   })
 
   const folderList = Array.from(folders)
-  const instructions = folderList.length > 0
+  const instructions = mode === 'full'
+    ? 'Biblioteca completa con imágenes incluidas. Usa "Cargar Biblioteca" para restaurar automáticamente.'
+    : folderList.length > 0
     ? `IMPORTANTE: Para cargar esta biblioteca, usa "Cargar Carpeta" en Análisis y selecciona la carpeta que contiene las imágenes. Carpetas detectadas: ${folderList.join(', ')}`
     : 'IMPORTANTE: Para cargar esta biblioteca, usa "Cargar Carpeta" en Análisis y selecciona la carpeta que contiene las imágenes.'
 
@@ -44,13 +50,15 @@ export async function exportLibraryToJSON(
     version: '1.0',
     savedAt: new Date().toISOString(),
     instructions,
+    mode,
     images: images.map(img => ({
       id: img.id,
       filename: img.filename,
       filePath: img.filePath || img.filename,
       size: img.size,
       timestamp: img.timestamp,
-      markedForReport: markedForReport.includes(img.id)
+      markedForReport: markedForReport.includes(img.id),
+      imageData: mode === 'full' ? img.url : undefined // Guardar base64 completo en modo 'full'
     }))
   }
 
@@ -60,7 +68,7 @@ export async function exportLibraryToJSON(
 
   const link = document.createElement('a')
   link.href = url
-  link.download = `ikuski-biblioteca-${new Date().toISOString().split('T')[0]}.json`
+  link.download = `ikuski-biblioteca-${mode}-${new Date().toISOString().split('T')[0]}.json`
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
@@ -95,31 +103,48 @@ export async function importLibraryFromJSON(file: File): Promise<LibraryData> {
 }
 
 /**
- * Carga imágenes desde rutas de archivo
- * Retorna las imágenes cargadas con sus URLs en base64
+ * Carga imágenes desde datos guardados en la biblioteca
+ * Si el modo es 'full', carga directamente desde base64
+ * Si el modo es 'metadata', requiere que el usuario seleccione los archivos
  */
-export async function loadImagesFromPaths(
+export async function loadImagesFromLibrary(
   libraryData: LibraryData
 ): Promise<{
   images: Array<{ id: string; url: string; filename: string; filePath: string; size?: string; timestamp?: string }>
   markedIds: string[]
+  needsFileSelection: boolean
 }> {
   const images: Array<{ id: string; url: string; filename: string; filePath: string; size?: string; timestamp?: string }> = []
   const markedIds: string[] = []
 
-  // En el navegador, no podemos acceder directamente a rutas del sistema de archivos
-  // por razones de seguridad. En su lugar, necesitamos que el usuario seleccione los archivos
-  console.warn('[Library] No se pueden cargar automáticamente rutas de archivo desde el navegador.')
-  console.warn('[Library] El usuario debe seleccionar manualmente los archivos.')
-
-  // Retornar los metadatos para que el usuario sepa qué archivos debe cargar
+  // Recopilar IDs marcados
   libraryData.images.forEach(img => {
     if (img.markedForReport) {
       markedIds.push(img.id)
     }
   })
 
-  return { images, markedIds }
+  // Si el modo es 'full', cargar imágenes directamente desde base64
+  if (libraryData.mode === 'full') {
+    libraryData.images.forEach(img => {
+      if (img.imageData) {
+        images.push({
+          id: img.id,
+          url: img.imageData,
+          filename: img.filename,
+          filePath: img.filePath,
+          size: img.size,
+          timestamp: img.timestamp
+        })
+      }
+    })
+    console.log('[Library] Cargadas', images.length, 'imágenes desde base64')
+    return { images, markedIds, needsFileSelection: false }
+  }
+
+  // Si el modo es 'metadata', el usuario debe seleccionar los archivos manualmente
+  console.warn('[Library] Modo metadata: el usuario debe seleccionar los archivos manualmente')
+  return { images, markedIds, needsFileSelection: true }
 }
 
 /**

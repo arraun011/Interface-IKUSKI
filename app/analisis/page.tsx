@@ -15,7 +15,7 @@ import { useAnalysisState, ImageItem, Detection } from "@/contexts/analysis-cont
 import { detectDuplicates, DuplicateGroup } from "@/lib/phash-utils"
 import { SessionManager } from "@/components/session-manager"
 import { saveAnalysisSession, loadAnalysisSession, exportSessionToFile, parseSessionFile, AnalysisSessionExport } from "@/lib/session-storage"
-import { exportLibraryToJSON, importLibraryFromJSON, reconstructLibraryFromFiles } from "@/lib/library-storage"
+import { exportLibraryToJSON, importLibraryFromJSON, reconstructLibraryFromFiles, loadImagesFromLibrary } from "@/lib/library-storage"
 import Image from "next/image"
 
 interface Model {
@@ -666,13 +666,15 @@ export default function AnalisisPage() {
     }
   }, [loadedImages, pendingSessionImport])
 
-  // Exportar biblioteca a JSON
+  // Exportar biblioteca a JSON (modo completo con base64)
   const handleExportLibrary = async () => {
     try {
-      await exportLibraryToJSON(loadedImages, markedForReport)
+      // Siempre exportar en modo 'full' con imágenes base64 incluidas
+      await exportLibraryToJSON(loadedImages, markedForReport, 'full')
       toast({
-        title: "Biblioteca Exportada",
-        description: `Se exportaron ${loadedImages.length} imágenes con sus rutas`
+        title: "Biblioteca Exportada (Completa)",
+        description: `Se exportaron ${loadedImages.length} imágenes con datos completos en base64. El archivo puede ser grande pero es totalmente portable.`,
+        duration: 8000
       })
     } catch (error: any) {
       toast({
@@ -684,7 +686,7 @@ export default function AnalisisPage() {
   }
 
   // Importar biblioteca desde JSON
-  const handleImportLibrary = () => {
+  const handleImportLibrary = async () => {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = '.json'
@@ -695,53 +697,18 @@ export default function AnalisisPage() {
       try {
         const libraryData = await importLibraryFromJSON(file)
 
-        // Mostrar instrucciones del JSON
-        const instructions = libraryData.instructions || 'Selecciona las imágenes desde su ubicación original.'
-
         toast({
           title: "Biblioteca Cargada",
-          description: `${libraryData.images.length} imágenes encontradas. ${instructions}`,
-          duration: 10000
+          description: `${libraryData.images.length} imágenes encontradas. Modo: ${libraryData.mode === 'full' ? 'Completo (con imágenes)' : 'Solo metadatos'}`,
+          duration: 5000
         })
 
-        // Mostrar instrucciones sobre qué archivos cargar
-        const filenames = libraryData.images.map(img => img.filePath || img.filename).join('\n')
-        console.log('[Library] Archivos necesarios:\n', filenames)
-        console.log('[Library] Usa "Cargar Carpeta" para seleccionar la carpeta raíz que contiene estas imágenes')
+        // Cargar imágenes según el modo
+        const { images: loadedImgs, markedIds, needsFileSelection } = await loadImagesFromLibrary(libraryData)
 
-        // Abrir selector de CARPETA para que el usuario cargue las imágenes
-        const imageInput = document.createElement('input')
-        imageInput.type = 'file'
-        imageInput.webkitdirectory = true // Selector de carpeta
-        imageInput.multiple = true
-        imageInput.onchange = async (imgEvent: any) => {
-          const files = Array.from(imgEvent.target.files) as File[]
-
-          // Reconstruir biblioteca con los archivos cargados
-          const { images: reconstructedImages, markedIds } = reconstructLibraryFromFiles(files, libraryData)
-
-          // Cargar imágenes
-          const newImages: ImageItem[] = []
-          for (const img of reconstructedImages) {
-            const reader = new FileReader()
-            await new Promise((resolve) => {
-              reader.onload = (event) => {
-                newImages.push({
-                  id: img.id,
-                  url: event.target?.result as string,
-                  filename: img.filename,
-                  filePath: img.filePath,
-                  size: img.size,
-                  timestamp: img.timestamp
-                })
-                resolve(null)
-              }
-              reader.readAsDataURL(img.file)
-            })
-          }
-
-          // Agregar imágenes y marcar las que estaban marcadas
-          addImages(newImages)
+        if (!needsFileSelection) {
+          // Modo 'full': cargar imágenes directamente desde base64
+          addImages(loadedImgs)
 
           // Restaurar marcas
           markedIds.forEach(id => {
@@ -751,11 +718,66 @@ export default function AnalisisPage() {
           })
 
           toast({
-            title: "Biblioteca Restaurada",
-            description: `Se cargaron ${newImages.length} imágenes, ${markedIds.length} marcadas para informe`
+            title: "Biblioteca Restaurada Automáticamente",
+            description: `Se cargaron ${loadedImgs.length} imágenes desde el archivo, ${markedIds.length} marcadas para informe`,
+            duration: 5000
           })
+        } else {
+          // Modo 'metadata': requiere selección de archivos
+          const instructions = libraryData.instructions || 'Selecciona la carpeta que contiene las imágenes.'
+
+          toast({
+            title: "Selecciona los Archivos",
+            description: instructions,
+            duration: 10000
+          })
+
+          console.log('[Library] Archivos necesarios:\n', libraryData.images.map(img => img.filePath || img.filename).join('\n'))
+
+          // Abrir selector de CARPETA
+          const imageInput = document.createElement('input')
+          imageInput.type = 'file'
+          imageInput.webkitdirectory = true
+          imageInput.multiple = true
+          imageInput.onchange = async (imgEvent: any) => {
+            const files = Array.from(imgEvent.target.files) as File[]
+
+            const { images: reconstructedImages, markedIds: reconstructedMarkedIds } = reconstructLibraryFromFiles(files, libraryData)
+
+            const newImages: ImageItem[] = []
+            for (const img of reconstructedImages) {
+              const reader = new FileReader()
+              await new Promise((resolve) => {
+                reader.onload = (event) => {
+                  newImages.push({
+                    id: img.id,
+                    url: event.target?.result as string,
+                    filename: img.filename,
+                    filePath: img.filePath,
+                    size: img.size,
+                    timestamp: img.timestamp
+                  })
+                  resolve(null)
+                }
+                reader.readAsDataURL(img.file)
+              })
+            }
+
+            addImages(newImages)
+
+            reconstructedMarkedIds.forEach(id => {
+              if (!markedForReport.includes(id)) {
+                toggleMarkForReport(id)
+              }
+            })
+
+            toast({
+              title: "Biblioteca Restaurada",
+              description: `Se cargaron ${newImages.length} imágenes, ${reconstructedMarkedIds.length} marcadas para informe`
+            })
+          }
+          imageInput.click()
         }
-        imageInput.click()
 
       } catch (error: any) {
         toast({
