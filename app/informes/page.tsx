@@ -6,6 +6,16 @@ import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { FileText, Download, Eye, Sparkles, MapPin, Image as ImageIcon, Printer, Save, FolderOpen, Edit, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, AlignJustify, List, ListOrdered, Undo, Redo, Type } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useAnalysisState } from "@/contexts/analysis-context"
@@ -90,8 +100,8 @@ export default function InformesPage() {
     projectName: "",
     installationCode: "",
     location: "",
-    inspectionDate: new Date().toISOString().split('T')[0],
-    reportDate: new Date().toISOString().split('T')[0],
+    inspectionDate: "", // Campo manual
+    reportDate: "", // Campo manual
     inspector: "",
     reviewer: "",
     client: "",
@@ -115,6 +125,11 @@ export default function InformesPage() {
   const [coverImageBase64, setCoverImageBase64] = useState<string>('')
   const [selectedLanguage, setSelectedLanguage] = useState<'es' | 'en' | 'pt'>('es')
   const [autoLocationLoaded, setAutoLocationLoaded] = useState(false)
+  const [showValidationErrors, setShowValidationErrors] = useState(false)
+  const [showMissingFieldsDialog, setShowMissingFieldsDialog] = useState(false)
+  const [showMissingAnalysisDialog, setShowMissingAnalysisDialog] = useState(false)
+  const [missingFields, setMissingFields] = useState<string[]>([])
+  const [pendingExport, setPendingExport] = useState(false)
 
   // Obtener imágenes marcadas con sus detecciones
   const markedImages = loadedImages.filter(img => markedForReport.includes(img.id))
@@ -393,6 +408,21 @@ export default function InformesPage() {
       return
     }
 
+    // Validar campos obligatorios
+    const missing = validateRequiredFields()
+    if (missing.length > 0) {
+      setMissingFields(missing)
+      setShowValidationErrors(true)
+      setShowMissingFieldsDialog(true)
+      return
+    }
+
+    // Verificar si hay análisis generados (advertencia pero permitir continuar)
+    if (!hasAllAnalysis()) {
+      setShowMissingAnalysisDialog(true)
+      return
+    }
+
     setGenerating(true)
 
     try {
@@ -481,6 +511,25 @@ export default function InformesPage() {
     }
   }
 
+  // Validar campos obligatorios
+  const validateRequiredFields = () => {
+    const missing: string[] = []
+
+    if (!projectData.projectName) missing.push("Nombre del Proyecto")
+    if (!projectData.location) missing.push("Localización")
+    if (!projectData.client) missing.push("Cliente")
+    if (!projectData.inspectionDate) missing.push("Fecha de Inspección")
+    if (!projectData.reportDate) missing.push("Fecha del Informe")
+    if (!projectData.inspector) missing.push("Elaborado por")
+
+    return missing
+  }
+
+  // Verificar si hay análisis generados
+  const hasAllAnalysis = () => {
+    return markedImages.every(img => imageAnalysis[img.id] && imageAnalysis[img.id] !== "Haz clic en 'Generar Análisis IA' para obtener un análisis automático, o escribe tu propio análisis aquí...")
+  }
+
   // Exportar a Word
   const handleExportWord = async () => {
     if (markedImages.length === 0) {
@@ -492,6 +541,27 @@ export default function InformesPage() {
       return
     }
 
+    // Validar campos obligatorios
+    const missing = validateRequiredFields()
+    if (missing.length > 0) {
+      setMissingFields(missing)
+      setShowValidationErrors(true)
+      setShowMissingFieldsDialog(true)
+      return
+    }
+
+    // Verificar si hay análisis generados
+    if (!hasAllAnalysis()) {
+      setShowMissingAnalysisDialog(true)
+      return
+    }
+
+    // Proceder con la exportación
+    await performExport()
+  }
+
+  // Función que realiza la exportación real
+  const performExport = async () => {
     setGenerating(true)
 
     try {
@@ -603,6 +673,22 @@ export default function InformesPage() {
         description: "Debes marcar al menos una imagen en Análisis para imprimir el informe",
         variant: "destructive"
       })
+      return
+    }
+
+    // Validar campos obligatorios
+    const missing = validateRequiredFields()
+    if (missing.length > 0) {
+      setMissingFields(missing)
+      setShowValidationErrors(true)
+      setShowMissingFieldsDialog(true)
+      return
+    }
+
+    // Verificar si hay análisis generados
+    if (!hasAllAnalysis()) {
+      setShowMissingAnalysisDialog(true)
+      setPendingExport(true) // Marcar que queremos imprimir después de confirmar
       return
     }
 
@@ -982,12 +1068,15 @@ export default function InformesPage() {
                 />
               </div>
               <div className="space-y-2 col-span-2">
-                <Label htmlFor="project-name">Nombre del Proyecto</Label>
+                <Label htmlFor="project-name" className={showValidationErrors && !projectData.projectName ? "text-red-500" : ""}>
+                  Nombre del Proyecto {showValidationErrors && !projectData.projectName && <span className="text-red-500">*</span>}
+                </Label>
                 <Input
                   id="project-name"
                   value={projectData.projectName}
                   onChange={(e) => setProjectData({...projectData, projectName: e.target.value})}
                   placeholder="Inspección de estructura metálica..."
+                  className={showValidationErrors && !projectData.projectName ? "border-red-500" : ""}
                 />
               </div>
               <div className="space-y-2 col-span-2">
@@ -1001,30 +1090,63 @@ export default function InformesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="location">Localización</Label>
+                <Label htmlFor="location" className={showValidationErrors && !projectData.location ? "text-red-500" : ""}>
+                  Localización {showValidationErrors && !projectData.location && <span className="text-red-500">*</span>}
+                </Label>
                 <Input
                   id="location"
                   value={projectData.location}
                   onChange={(e) => setProjectData({...projectData, location: e.target.value})}
                   placeholder="Ciudad, Provincia"
+                  className={showValidationErrors && !projectData.location ? "border-red-500" : ""}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="client">Cliente</Label>
+                <Label htmlFor="client" className={showValidationErrors && !projectData.client ? "text-red-500" : ""}>
+                  Cliente {showValidationErrors && !projectData.client && <span className="text-red-500">*</span>}
+                </Label>
                 <Input
                   id="client"
                   value={projectData.client}
                   onChange={(e) => setProjectData({...projectData, client: e.target.value})}
                   placeholder="Nombre de la empresa cliente"
+                  className={showValidationErrors && !projectData.client ? "border-red-500" : ""}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="inspector">Elaborado por</Label>
+                <Label htmlFor="inspection-date" className={showValidationErrors && !projectData.inspectionDate ? "text-red-500" : ""}>
+                  Fecha de Inspección {showValidationErrors && !projectData.inspectionDate && <span className="text-red-500">*</span>}
+                </Label>
+                <Input
+                  id="inspection-date"
+                  type="date"
+                  value={projectData.inspectionDate}
+                  onChange={(e) => setProjectData({...projectData, inspectionDate: e.target.value})}
+                  className={showValidationErrors && !projectData.inspectionDate ? "border-red-500" : ""}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="report-date" className={showValidationErrors && !projectData.reportDate ? "text-red-500" : ""}>
+                  Fecha del Informe {showValidationErrors && !projectData.reportDate && <span className="text-red-500">*</span>}
+                </Label>
+                <Input
+                  id="report-date"
+                  type="date"
+                  value={projectData.reportDate}
+                  onChange={(e) => setProjectData({...projectData, reportDate: e.target.value})}
+                  className={showValidationErrors && !projectData.reportDate ? "border-red-500" : ""}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="inspector" className={showValidationErrors && !projectData.inspector ? "text-red-500" : ""}>
+                  Elaborado por {showValidationErrors && !projectData.inspector && <span className="text-red-500">*</span>}
+                </Label>
                 <Input
                   id="inspector"
                   value={projectData.inspector}
                   onChange={(e) => setProjectData({...projectData, inspector: e.target.value})}
                   placeholder="Nombre del Inspector"
+                  className={showValidationErrors && !projectData.inspector ? "border-red-500" : ""}
                 />
               </div>
               <div className="space-y-2">
@@ -1594,6 +1716,72 @@ export default function InformesPage() {
           </div>
         </div>
       )}
+
+      {/* Dialog de Campos Faltantes */}
+      <AlertDialog open={showMissingFieldsDialog} onOpenChange={setShowMissingFieldsDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-red-500">⚠️ Campos Obligatorios Incompletos</AlertDialogTitle>
+            <AlertDialogDescription>
+              Debes completar los siguientes campos obligatorios antes de generar el informe:
+              <ul className="mt-3 list-disc list-inside space-y-1">
+                {missingFields.map((field, index) => (
+                  <li key={index} className="text-red-600 font-medium">{field}</li>
+                ))}
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => {
+              setShowMissingFieldsDialog(false)
+              // Scroll al formulario de datos
+              window.scrollTo({ top: 0, behavior: 'smooth' })
+            }}>
+              Entendido
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Dialog de Análisis Faltantes */}
+      <AlertDialog open={showMissingAnalysisDialog} onOpenChange={setShowMissingAnalysisDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-yellow-600">⚠️ Análisis IA No Generados</AlertDialogTitle>
+            <AlertDialogDescription>
+              No se ha generado el análisis técnico automático para todas las imágenes.
+              <br /><br />
+              <strong>Opciones:</strong>
+              <ul className="mt-2 list-disc list-inside space-y-1">
+                <li>Generar los análisis automáticamente usando el botón "Generar Análisis IA"</li>
+                <li>Escribir manualmente el análisis técnico en cada imagen</li>
+                <li>Continuar sin análisis (no recomendado)</li>
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setShowMissingAnalysisDialog(false)
+              setPendingExport(false)
+            }}>
+              Volver
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={async () => {
+              setShowMissingAnalysisDialog(false)
+              if (pendingExport) {
+                setPendingExport(false)
+                // Si venía de imprimir, redirigir a handlePrint
+                // Para simplificar, dejamos que el usuario vuelva a hacer clic
+              } else {
+                // Continuar con la exportación
+                await performExport()
+              }
+            }}>
+              Continuar de todos modos
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

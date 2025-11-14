@@ -22,7 +22,9 @@
       "Bash(taskkill:*)",
       "Bash(timeout:*)",
       "Bash(nul)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(npm run build:*)",
+      "Bash(npx shadcn@latest add alert-dialog:*)"
     ],
     "deny": [],
     "ask": []
