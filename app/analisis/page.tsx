@@ -118,11 +118,13 @@ export default function AnalisisPage() {
         reader.onload = (event) => {
           const id = `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
           const sizeInKB = (file.size / 1024).toFixed(2)
+          // Intentar obtener ruta en diferentes formatos
+          const filePath = (file as any).webkitRelativePath || (file as any).path || file.name
           newImages.push({
             id,
             url: event.target?.result as string,
             filename: file.name,
-            filePath: (file as any).path || file.name, // Guardar ruta si está disponible
+            filePath: filePath, // webkitRelativePath, path, o solo filename
             size: `${sizeInKB} KB`,
             timestamp: new Date().toLocaleString('es-ES', {
               year: 'numeric',
@@ -693,21 +695,25 @@ export default function AnalisisPage() {
       try {
         const libraryData = await importLibraryFromJSON(file)
 
+        // Mostrar instrucciones del JSON
+        const instructions = libraryData.instructions || 'Selecciona las imágenes desde su ubicación original.'
+
         toast({
           title: "Biblioteca Cargada",
-          description: `Se encontraron ${libraryData.images.length} imágenes. Ahora selecciona los archivos desde su ubicación original.`,
-          duration: 8000
+          description: `${libraryData.images.length} imágenes encontradas. ${instructions}`,
+          duration: 10000
         })
 
         // Mostrar instrucciones sobre qué archivos cargar
-        const filenames = libraryData.images.map(img => img.filename).join(', ')
-        console.log('[Library] Archivos necesarios:', filenames)
+        const filenames = libraryData.images.map(img => img.filePath || img.filename).join('\n')
+        console.log('[Library] Archivos necesarios:\n', filenames)
+        console.log('[Library] Usa "Cargar Carpeta" para seleccionar la carpeta raíz que contiene estas imágenes')
 
-        // Abrir selector de archivos para que el usuario cargue las imágenes
+        // Abrir selector de CARPETA para que el usuario cargue las imágenes
         const imageInput = document.createElement('input')
         imageInput.type = 'file'
+        imageInput.webkitdirectory = true // Selector de carpeta
         imageInput.multiple = true
-        imageInput.accept = 'image/*'
         imageInput.onchange = async (imgEvent: any) => {
           const files = Array.from(imgEvent.target.files) as File[]
 

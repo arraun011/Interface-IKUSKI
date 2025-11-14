@@ -14,6 +14,7 @@ export interface LibraryImageData {
 export interface LibraryData {
   version: string
   savedAt: string
+  instructions: string
   images: LibraryImageData[]
 }
 
@@ -24,9 +25,25 @@ export async function exportLibraryToJSON(
   images: Array<{ id: string; filename: string; filePath?: string; size?: string; timestamp?: string }>,
   markedForReport: string[]
 ): Promise<void> {
+  // Agrupar imágenes por carpeta (extraer directorio de filePath)
+  const folders = new Set<string>()
+  images.forEach(img => {
+    const path = img.filePath || img.filename
+    const lastSlash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+    if (lastSlash > 0) {
+      folders.add(path.substring(0, lastSlash))
+    }
+  })
+
+  const folderList = Array.from(folders)
+  const instructions = folderList.length > 0
+    ? `IMPORTANTE: Para cargar esta biblioteca, usa "Cargar Carpeta" en Análisis y selecciona la carpeta que contiene las imágenes. Carpetas detectadas: ${folderList.join(', ')}`
+    : 'IMPORTANTE: Para cargar esta biblioteca, usa "Cargar Carpeta" en Análisis y selecciona la carpeta que contiene las imágenes.'
+
   const libraryData: LibraryData = {
     version: '1.0',
     savedAt: new Date().toISOString(),
+    instructions,
     images: images.map(img => ({
       id: img.id,
       filename: img.filename,
