@@ -463,18 +463,6 @@ export function generateReportHTML(data: ReportData, t: ReportTranslations): str
             <div class="cover-info-value">${projectData.location}</div>
           </div>
           ` : ''}
-          ${projectData.city ? `
-          <div class="cover-info-row">
-            <div class="cover-info-label">${t.coverCity}:</div>
-            <div class="cover-info-value">${projectData.city}</div>
-          </div>
-          ` : ''}
-          ${projectData.country ? `
-          <div class="cover-info-row">
-            <div class="cover-info-label">${t.coverCountry}:</div>
-            <div class="cover-info-value">${projectData.country}</div>
-          </div>
-          ` : ''}
           <div class="cover-info-row">
             <div class="cover-info-label">${t.coverDate}:</div>
             <div class="cover-info-value">${new Date(projectData.inspectionDate).toLocaleDateString(data.language === 'en' ? 'en-US' : data.language === 'pt' ? 'pt-PT' : 'es-ES')}</div>
@@ -556,29 +544,31 @@ export function generateReportHTML(data: ReportData, t: ReportTranslations): str
     </p>
     ` : ''}
 
-    <h2>${projectData.introduction ? '3' : '2'}. ${t.technicalSummary}</h2>
-    <table>
-      <tr>
-        <th>${t.totalDetections}</th>
-        <td>${totalDetections}</td>
-      </tr>
-      <tr>
-        <th class="severity-high">${t.highSeverity}</th>
-        <td class="severity-high">${severityCounts.alto} (${totalDetections > 0 ? ((severityCounts.alto / totalDetections) * 100).toFixed(1) : '0'}%)</td>
-      </tr>
-      <tr>
-        <th class="severity-medium">${t.mediumSeverity}</th>
-        <td class="severity-medium">${severityCounts.medio} (${totalDetections > 0 ? ((severityCounts.medio / totalDetections) * 100).toFixed(1) : '0'}%)</td>
-      </tr>
-      <tr>
-        <th class="severity-low">${t.lowSeverity}</th>
-        <td class="severity-low">${severityCounts.bajo} (${totalDetections > 0 ? ((severityCounts.bajo / totalDetections) * 100).toFixed(1) : '0'}%)</td>
-      </tr>
-      <tr>
-        <th>${t.avgConfidence}</th>
-        <td>${avgConfidence}%</td>
-      </tr>
-    </table>
+    <h2>${projectData.introduction ? '3' : '2'}. ${t.detectionMethodology}</h2>
+    <p style="line-height: 1.6;">
+      ${t.methodologyIntro}
+    </p>
+
+    <h3>${t.severityCriteria}</h3>
+    <p style="margin-left: 15px; line-height: 1.6;">
+      <strong class="severity-high">• ${t.severityCriteriaExtensive}</strong>
+    </p>
+    <p style="margin-left: 15px; line-height: 1.6;">
+      <strong class="severity-medium">• ${t.severityCriteriaModerate}</strong>
+    </p>
+    <p style="margin-left: 15px; line-height: 1.6;">
+      <strong class="severity-low">• ${t.severityCriteriaSlight}</strong>
+    </p>
+
+    <h3>${t.confidenceLevel}</h3>
+    <p style="line-height: 1.6;">
+      ${t.confidenceLevelExplanation}
+    </p>
+
+    <h4>${t.lowConfidenceProtocol}</h4>
+    <p style="line-height: 1.6; background-color: #fef3c7; padding: 10px; border-left: 4px solid #f59e0b; margin: 10px 0;">
+      <strong>${t.qualityProtocol}</strong>
+    </p>
 
     <div class="photo-section">
       <h2>${projectData.introduction ? '4' : '3'}. ${t.photographic} ${t.annex}</h2>
@@ -770,14 +760,20 @@ function generatePrintStyles(): string {
         font-size: 10pt;
         line-height: 1.4;
       }
-      /* Ocultar los logos integrados de la portada en impresión */
-      .cover-page .cover-logos {
-        display: none !important;
-      }
+      /* Portada: mostrar solo los logos integrados, página completa */
       .cover-page {
         page-break-after: always;
+        min-height: 100vh;
       }
-      /* Ocultar el encabezado dentro de content-page para evitar duplicados */
+      .cover-page .cover-logos {
+        display: table !important;
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        right: 20px;
+        width: calc(100% - 40px);
+      }
+      /* Content-page: ocultar el encabezado redundante */
       .content-page .page-header {
         display: none !important;
       }

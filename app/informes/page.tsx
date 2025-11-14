@@ -16,9 +16,10 @@ import { exportToWord, printReport, generateReportHTML, generateStyles, type Rep
 import { getLogoBase64 } from "@/lib/logo-utils"
 import { getTranslations } from "@/lib/report-translations"
 import { processImagesWithBoxes } from "@/lib/image-with-boxes"
-import { getStaticMapImageUrl, getStaticMapBase64, getStaticMapProxyUrl, getOpenStreetMapUrl, getGoogleMapsUrl, formatGPSCoordinates, imageUrlToBase64 } from "@/lib/maps-utils"
+import { getStaticMapImageUrl, getStaticMapBase64, getStaticMapProxyUrl, getOpenStreetMapUrl, getGoogleMapsUrl, formatGPSCoordinates, imageUrlToBase64, reverseGeocode } from "@/lib/maps-utils"
 import { SessionManager } from "@/components/session-manager"
 import { saveReportDraft, loadReportDraft } from "@/lib/session-storage"
+import { GooglePlacesAutocomplete } from "@/components/google-places-autocomplete"
 
 // Interfaz para datos GPS
 interface GPSData {
@@ -113,10 +114,7 @@ export default function InformesPage() {
   const [clientLogoBase64, setClientLogoBase64] = useState<string>('')
   const [coverImageBase64, setCoverImageBase64] = useState<string>('')
   const [selectedLanguage, setSelectedLanguage] = useState<'es' | 'en' | 'pt'>('es')
-
-  // Datos adicionales para portada
-  const [city, setCity] = useState<string>('')
-  const [country, setCountry] = useState<string>('')
+  const [autoLocationLoaded, setAutoLocationLoaded] = useState(false)
 
   // Obtener imágenes marcadas con sus detecciones
   const markedImages = loadedImages.filter(img => markedForReport.includes(img.id))
@@ -175,6 +173,38 @@ export default function InformesPage() {
 
     loadAllGPS()
   }, [markedImages.length])
+
+  // Auto-completar localización desde la primera imagen con GPS
+  useEffect(() => {
+    const autoFillLocation = async () => {
+      if (autoLocationLoaded || markedImages.length === 0 || projectData.location) return
+
+      const firstImage = markedImages[0]
+      const gps = imageGPS[firstImage.id]
+
+      if (gps && gps.hasGPS && gps.latitude && gps.longitude) {
+        console.log('[Informes] Auto-filling location from first image GPS:', {
+          latitude: gps.latitude,
+          longitude: gps.longitude
+        })
+        const lat = parseFloat(gps.latitude)
+        const lon = parseFloat(gps.longitude)
+
+        const geocodeResult = await reverseGeocode(lat, lon)
+        if (geocodeResult) {
+          console.log('[Informes] Setting location to:', geocodeResult.formatted)
+          setProjectData(prev => ({ ...prev, location: geocodeResult.formatted }))
+          setAutoLocationLoaded(true)
+          toast({
+            title: "Localización Auto-detectada",
+            description: geocodeResult.formatted
+          })
+        }
+      }
+    }
+
+    autoFillLocation()
+  }, [markedImages.length, imageGPS, projectData.location, autoLocationLoaded])
 
   // Generar URLs de mapas usando proxy después de tener las coordenadas GPS
   useEffect(() => {
@@ -420,9 +450,7 @@ export default function InformesPage() {
       // Preparar datos del reporte
       const reportData: ReportData = {
         projectData: {
-          ...projectData,
-          city: city || undefined,
-          country: country || undefined
+          ...projectData
         },
         images: imagesWithMaps,
         language: selectedLanguage,
@@ -542,8 +570,6 @@ export default function InformesPage() {
       const reportData = {
         projectData: {
           ...projectData,
-          city: city || undefined,
-          country: country || undefined
         },
         images: imagesWithMaps,
         language: selectedLanguage,
@@ -730,8 +756,6 @@ export default function InformesPage() {
       const reportData = {
         projectData: {
           ...projectData,
-          city: city || undefined,
-          country: country || undefined
         },
         images: imagesWithMaps,
         language: selectedLanguage,
@@ -1050,25 +1074,23 @@ export default function InformesPage() {
             </div>
 
             <h3 className="text-lg font-semibold mt-6 mb-4">Datos para Portada</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="city">Población</Label>
-                <Input
-                  id="city"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder="Nombre de la población"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="country">País</Label>
-                <Input
-                  id="country"
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value)}
-                  placeholder="Nombre del país"
-                />
-              </div>
+            <div className="grid grid-cols-1 gap-4">
+              <GooglePlacesAutocomplete
+                label="Buscar Ubicación (Autodetección GPS o manual)"
+                placeholder="Ejemplo: Bilbao, Bizkaia, España"
+                onPlaceSelected={(place) => {
+                  console.log('[Informes] Place selected:', place)
+                  setProjectData(prev => ({ ...prev, location: place.formatted }))
+                  setAutoLocationLoaded(true)
+                  toast({
+                    title: "Ubicación Seleccionada",
+                    description: place.formatted
+                  })
+                }}
+              />
+              <p className="text-sm text-muted-foreground -mt-2">
+                💡 Se autocompleta automáticamente desde el GPS de la primera imagen, o busca manualmente una ubicación
+              </p>
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="cover-image">Imagen Aérea para Portada (opcional)</Label>
                 <Input

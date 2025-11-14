@@ -368,3 +368,60 @@ export function getStaticMapProxyUrl(options: MapOptions): string {
   console.log('[Maps] Proxy URL generated:', proxyUrl)
   return proxyUrl
 }
+
+/**
+ * Convierte coordenadas GPS a dirección usando Google Geocoding API
+ * @returns Dirección formateada como "Ciudad, Provincia/Estado, País"
+ */
+export async function reverseGeocode(latitude: number, longitude: number): Promise<{
+  formatted: string
+  city: string
+  state: string
+  country: string
+} | null> {
+  try {
+    const apiKey = 'AIzaSyArUGYRVac29Jq9inE0bLbFYnAatXEUUJk'
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${apiKey}&language=es`
+
+    console.log('[Geocoding] Reverse geocoding:', { latitude, longitude })
+
+    const response = await fetch(url)
+    const data = await response.json()
+
+    if (data.status !== 'OK' || !data.results || data.results.length === 0) {
+      console.warn('[Geocoding] No results found')
+      return null
+    }
+
+    const result = data.results[0]
+    let city = ''
+    let state = ''
+    let country = ''
+
+    // Extraer componentes de la dirección
+    for (const component of result.address_components) {
+      const types = component.types
+
+      if (types.includes('locality')) {
+        city = component.long_name
+      } else if (types.includes('administrative_area_level_2') && !city) {
+        city = component.long_name
+      } else if (types.includes('administrative_area_level_1')) {
+        state = component.long_name
+      } else if (types.includes('country')) {
+        country = component.long_name
+      }
+    }
+
+    // Formato: "Bilbao, Bizkaia, España"
+    const parts = [city, state, country].filter(Boolean)
+    const formatted = parts.join(', ')
+
+    console.log('[Geocoding] Result:', { formatted, city, state, country })
+
+    return { formatted, city, state, country }
+  } catch (error) {
+    console.error('[Geocoding] Error:', error)
+    return null
+  }
+}

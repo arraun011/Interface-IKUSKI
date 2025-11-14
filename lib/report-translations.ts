@@ -49,6 +49,17 @@ export interface ReportTranslations {
   coverCity: string
   coverCountry: string
   coverDate: string
+  // Metodología y criterios de detección
+  detectionMethodology: string
+  methodologyIntro: string
+  severityCriteria: string
+  severityCriteriaExtensive: string
+  severityCriteriaModerate: string
+  severityCriteriaSlight: string
+  confidenceLevel: string
+  confidenceLevelExplanation: string
+  lowConfidenceProtocol: string
+  qualityProtocol: string
 }
 
 const translations: Record<'es' | 'en' | 'pt', ReportTranslations> = {
@@ -107,7 +118,17 @@ Enfócate en la corrosión detectada de forma objetiva y técnica, sin hacer ref
     coverLocation: 'Localización',
     coverCity: 'Población',
     coverCountry: 'País',
-    coverDate: 'Fecha de Inspección'
+    coverDate: 'Fecha de Inspección',
+    detectionMethodology: 'METODOLOGÍA Y CRITERIOS DE DETECCIÓN',
+    methodologyIntro: 'El sistema de detección de corrosión mediante IA utiliza modelos de visión artificial entrenados específicamente para identificar y clasificar deterioro en estructuras metálicas. La evaluación se basa en dos parámetros fundamentales:',
+    severityCriteria: 'Criterios de Severidad',
+    severityCriteriaExtensive: 'Corrosión Extensa: Áreas con deterioro significativo de la superficie metálica, pérdida avanzada de recubrimiento protector y presencia de oxidación profunda que compromete la integridad estructural.',
+    severityCriteriaModerate: 'Corrosión Moderada: Zonas con deterioro visible del recubrimiento, presencia de óxido superficial a medio y áreas que requieren atención preventiva para evitar progresión.',
+    severityCriteriaSlight: 'Corrosión Leve: Deterioro incipiente del recubrimiento protector, manchas de óxido superficial y áreas en etapa inicial de degradación.',
+    confidenceLevel: 'Nivel de Confianza',
+    confidenceLevelExplanation: 'El nivel de confianza indica la certeza del sistema en la identificación de cada detección, expresado en porcentaje. Valores superiores al 70% indican alta certeza en la identificación. Una baja puntuación de confianza (por ejemplo, menor al 50%) no necesariamente significa que la detección sea incorrecta, sino que las condiciones de la imagen (como iluminación subóptima, desenfoque, sombras oclusivas o suciedad) han dificultado la clasificación al máximo nivel de certeza. No obstante, esto no anula el hallazgo de la patología pese a la baja puntuación de confianza del sistema.',
+    lowConfidenceProtocol: 'Protocolo de Baja Confianza',
+    qualityProtocol: 'En cumplimiento con nuestros protocolos de calidad, todo hallazgo con baja confianza (<70%) se trata como un riesgo potencial que debe ser priorizado para una inspección visual humana in situ para su validación final y confirmación de la severidad.'
   },
   en: {
     title: 'INSPECTION REPORT',
@@ -164,7 +185,17 @@ Focus on the detected corrosion in an objective and technical manner, without re
     coverLocation: 'Location',
     coverCity: 'City',
     coverCountry: 'Country',
-    coverDate: 'Inspection Date'
+    coverDate: 'Inspection Date',
+    detectionMethodology: 'DETECTION METHODOLOGY AND CRITERIA',
+    methodologyIntro: 'The AI-based corrosion detection system uses computer vision models specifically trained to identify and classify deterioration in metal structures. The evaluation is based on two fundamental parameters:',
+    severityCriteria: 'Severity Criteria',
+    severityCriteriaExtensive: 'Extensive Corrosion: Areas with significant deterioration of the metal surface, advanced loss of protective coating and presence of deep oxidation that compromises structural integrity.',
+    severityCriteriaModerate: 'Moderate Corrosion: Zones with visible coating deterioration, presence of surface to medium rust and areas requiring preventive attention to avoid progression.',
+    severityCriteriaSlight: 'Slight Corrosion: Incipient deterioration of the protective coating, surface rust stains and areas in early stages of degradation.',
+    confidenceLevel: 'Confidence Level',
+    confidenceLevelExplanation: 'The confidence level indicates the system\'s certainty in identifying each detection, expressed as a percentage. Values above 70% indicate high certainty in identification. A low confidence score (e.g., below 50%) does not necessarily mean that the detection is incorrect, but rather that the image conditions (such as suboptimal lighting, blur, occlusive shadows, or dirt) have made classification at the highest level of certainty difficult. Nevertheless, this does not invalidate the finding of the pathology despite the system\'s low confidence score.',
+    lowConfidenceProtocol: 'Low Confidence Protocol',
+    qualityProtocol: 'In compliance with our quality protocols, every finding with low confidence (<70%) is treated as a potential risk that must be prioritized for on-site human visual inspection for final validation and severity confirmation.'
   },
   pt: {
     title: 'RELATÓRIO DE INSPEÇÃO',
@@ -221,7 +252,17 @@ Foque na corrosão detectada de forma objetiva e técnica, sem fazer referência
     coverLocation: 'Localização',
     coverCity: 'Cidade',
     coverCountry: 'País',
-    coverDate: 'Data de Inspeção'
+    coverDate: 'Data de Inspeção',
+    detectionMethodology: 'METODOLOGIA E CRITÉRIOS DE DETECÇÃO',
+    methodologyIntro: 'O sistema de detecção de corrosão por IA utiliza modelos de visão artificial treinados especificamente para identificar e classificar deterioração em estruturas metálicas. A avaliação baseia-se em dois parâmetros fundamentais:',
+    severityCriteria: 'Critérios de Severidade',
+    severityCriteriaExtensive: 'Corrosão Extensa: Áreas com deterioração significativa da superfície metálica, perda avançada de revestimento protetor e presença de oxidação profunda que compromete a integridade estrutural.',
+    severityCriteriaModerate: 'Corrosão Moderada: Zonas com deterioração visível do revestimento, presença de ferrugem superficial a média e áreas que requerem atenção preventiva para evitar progressão.',
+    severityCriteriaSlight: 'Corrosão Leve: Deterioração incipiente do revestimento protetor, manchas de ferrugem superficial e áreas em estágio inicial de degradação.',
+    confidenceLevel: 'Nível de Confiança',
+    confidenceLevelExplanation: 'O nível de confiança indica a certeza do sistema na identificação de cada detecção, expresso em percentagem. Valores superiores a 70% indicam alta certeza na identificação. Uma baixa pontuação de confiança (por exemplo, inferior a 50%) não significa necessariamente que a detecção seja incorreta, mas sim que as condições da imagem (como iluminação subótima, desfoque, sombras oclusivas ou sujidade) dificultaram a classificação ao máximo nível de certeza. No entanto, isto não anula a descoberta da patologia apesar da baixa pontuação de confiança do sistema.',
+    lowConfidenceProtocol: 'Protocolo de Baixa Confiança',
+    qualityProtocol: 'Em cumprimento com nossos protocolos de qualidade, toda descoberta com baixa confiança (<70%) é tratada como um risco potencial que deve ser priorizado para uma inspeção visual humana in situ para sua validação final e confirmação da severidade.'
   }
 }
 
