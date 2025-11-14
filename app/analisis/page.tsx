@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
 import { Badge } from "@/components/ui/badge"
-import { Upload, Download, Play, Filter, ImageIcon, Folder, FolderOpen, CheckCircle2, X, Copy, Save, FileDown, FileUp } from "lucide-react"
+import { Upload, Download, Play, Filter, ImageIcon, Folder, FolderOpen, CheckCircle2, X, Copy, Save, FileDown, FileUp, BookOpen, BookMarked } from "lucide-react"
 import { useState, useRef, useEffect } from "react"
 import { useToast } from "@/hooks/use-toast"
 import { ImageGallery } from "@/components/image-gallery"
@@ -15,6 +15,7 @@ import { useAnalysisState, ImageItem, Detection } from "@/contexts/analysis-cont
 import { detectDuplicates, DuplicateGroup } from "@/lib/phash-utils"
 import { SessionManager } from "@/components/session-manager"
 import { saveAnalysisSession, loadAnalysisSession, exportSessionToFile, parseSessionFile, AnalysisSessionExport } from "@/lib/session-storage"
+import { exportLibraryToJSON, importLibraryFromJSON, reconstructLibraryFromFiles } from "@/lib/library-storage"
 import Image from "next/image"
 
 interface Model {
@@ -121,6 +122,7 @@ export default function AnalisisPage() {
             id,
             url: event.target?.result as string,
             filename: file.name,
+            filePath: (file as any).path || file.name, // Guardar ruta si está disponible
             size: `${sizeInKB} KB`,
             timestamp: new Date().toLocaleString('es-ES', {
               year: 'numeric',
@@ -166,10 +168,13 @@ export default function AnalisisPage() {
         reader.onload = (event) => {
           const id = `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
           const sizeInKB = (file.size / 1024).toFixed(2)
+          // webkitRelativePath incluye la ruta relativa desde la carpeta seleccionada
+          const relativePath = (file as any).webkitRelativePath || file.name
           newImages.push({
             id,
             url: event.target?.result as string,
             filename: file.name,
+            filePath: relativePath, // Guardar ruta relativa desde la carpeta
             size: `${sizeInKB} KB`,
             timestamp: new Date().toLocaleString('es-ES', {
               year: 'numeric',
@@ -659,6 +664,104 @@ export default function AnalisisPage() {
     }
   }, [loadedImages, pendingSessionImport])
 
+  // Exportar biblioteca a JSON
+  const handleExportLibrary = async () => {
+    try {
+      await exportLibraryToJSON(loadedImages, markedForReport)
+      toast({
+        title: "Biblioteca Exportada",
+        description: `Se exportaron ${loadedImages.length} imágenes con sus rutas`
+      })
+    } catch (error: any) {
+      toast({
+        title: "Error al Exportar",
+        description: error.message,
+        variant: "destructive"
+      })
+    }
+  }
+
+  // Importar biblioteca desde JSON
+  const handleImportLibrary = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json'
+    input.onchange = async (e: any) => {
+      const file = e.target.files?.[0]
+      if (!file) return
+
+      try {
+        const libraryData = await importLibraryFromJSON(file)
+
+        toast({
+          title: "Biblioteca Cargada",
+          description: `Se encontraron ${libraryData.images.length} imágenes. Ahora selecciona los archivos desde su ubicación original.`,
+          duration: 8000
+        })
+
+        // Mostrar instrucciones sobre qué archivos cargar
+        const filenames = libraryData.images.map(img => img.filename).join(', ')
+        console.log('[Library] Archivos necesarios:', filenames)
+
+        // Abrir selector de archivos para que el usuario cargue las imágenes
+        const imageInput = document.createElement('input')
+        imageInput.type = 'file'
+        imageInput.multiple = true
+        imageInput.accept = 'image/*'
+        imageInput.onchange = async (imgEvent: any) => {
+          const files = Array.from(imgEvent.target.files) as File[]
+
+          // Reconstruir biblioteca con los archivos cargados
+          const { images: reconstructedImages, markedIds } = reconstructLibraryFromFiles(files, libraryData)
+
+          // Cargar imágenes
+          const newImages: ImageItem[] = []
+          for (const img of reconstructedImages) {
+            const reader = new FileReader()
+            await new Promise((resolve) => {
+              reader.onload = (event) => {
+                newImages.push({
+                  id: img.id,
+                  url: event.target?.result as string,
+                  filename: img.filename,
+                  filePath: img.filePath,
+                  size: img.size,
+                  timestamp: img.timestamp
+                })
+                resolve(null)
+              }
+              reader.readAsDataURL(img.file)
+            })
+          }
+
+          // Agregar imágenes y marcar las que estaban marcadas
+          addImages(newImages)
+
+          // Restaurar marcas
+          markedIds.forEach(id => {
+            if (!markedForReport.includes(id)) {
+              toggleMarkForReport(id)
+            }
+          })
+
+          toast({
+            title: "Biblioteca Restaurada",
+            description: `Se cargaron ${newImages.length} imágenes, ${markedIds.length} marcadas para informe`
+          })
+        }
+        imageInput.click()
+
+      } catch (error: any) {
+        toast({
+          title: "Error al Importar",
+          description: error.message,
+          variant: "destructive"
+        })
+      }
+    }
+    input.click()
+  }
+
   return (
     <div className="flex h-screen bg-background">
       <SidebarNav />
@@ -713,6 +816,26 @@ export default function AnalisisPage() {
             >
               <Copy className="mr-2 h-4 w-4" />
               {isDetectingDuplicates ? "Detectando..." : "Detectar Duplicados"}
+            </Button>
+            <div className="h-6 w-px bg-border mx-2" />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportLibrary}
+              disabled={loadedImages.length === 0}
+              title="Guardar biblioteca de imágenes con rutas y selección"
+            >
+              <BookMarked className="mr-2 h-4 w-4" />
+              Guardar Biblioteca
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleImportLibrary}
+              title="Cargar biblioteca guardada previamente"
+            >
+              <BookOpen className="mr-2 h-4 w-4" />
+              Cargar Biblioteca
             </Button>
           </div>
 

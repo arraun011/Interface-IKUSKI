@@ -6,6 +6,7 @@ export interface ImageItem {
   id: string
   url: string
   filename: string
+  filePath?: string // Ruta original del archivo
   size?: string
   timestamp?: string
 }
