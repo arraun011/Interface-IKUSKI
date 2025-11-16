@@ -461,7 +461,7 @@ export default function InformesPage() {
             id: img.id,
             filename: img.filename,
             url: img.url,
-            urlWithBoxes: compressedImagesMap.get(img.url) || processedImagesMap.get(img.url) || img.url,
+            urlWithBoxes: processedImagesMap.get(img.url) || img.url, // SIN compresión para editor
             timestamp: img.timestamp || new Date().toLocaleString('es-ES'),
             gps,
             detections: getImageDetections(img.url),
@@ -851,7 +851,7 @@ export default function InformesPage() {
             id: img.id,
             filename: img.filename,
             url: img.url,
-            urlWithBoxes: compressedImagesMap.get(img.url) || processedImagesMap.get(img.url) || img.url,
+            urlWithBoxes: processedImagesMap.get(img.url) || img.url, // SIN compresión para impresión
             timestamp: img.timestamp || new Date().toLocaleString('es-ES'),
             gps,
             detections: getImageDetections(img.url),
