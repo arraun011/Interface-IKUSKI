@@ -32,6 +32,7 @@ import { saveReportDraft, loadReportDraft } from "@/lib/session-storage"
 import { GooglePlacesAutocomplete } from "@/components/google-places-autocomplete"
 import { exportLibraryToJSON, importLibraryFromJSON, reconstructLibraryFromFiles, loadImagesFromLibrary } from "@/lib/library-storage"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { compressImages, getTotalImagesSize } from "@/lib/image-compression"
 
 // Interfaz para datos GPS
 interface GPSData {
@@ -460,7 +461,7 @@ export default function InformesPage() {
             id: img.id,
             filename: img.filename,
             url: img.url,
-            urlWithBoxes: processedImagesMap.get(img.url) || img.url,
+            urlWithBoxes: compressedImagesMap.get(img.url) || processedImagesMap.get(img.url) || img.url,
             timestamp: img.timestamp || new Date().toLocaleString('es-ES'),
             gps,
             detections: getImageDetections(img.url),
@@ -588,6 +589,35 @@ export default function InformesPage() {
 
       const processedImagesMap = await processImagesWithBoxes(imagesToProcess)
 
+      // Comprimir imágenes para reducir tamaño del archivo Word
+      toast({
+        title: "Optimizando Imágenes",
+        description: "Comprimiendo imágenes para reducir tamaño del archivo..."
+      })
+
+      const imagesToCompress = markedImages.map(img =>
+        processedImagesMap.get(img.url) || img.url
+      )
+
+      const compressedImages = await compressImages(
+        imagesToCompress,
+        1200, // maxWidth
+        1200, // maxHeight
+        0.75, // quality
+        (current, total) => {
+          toast({
+            title: "Comprimiendo Imágenes",
+            description: `Procesando ${current} de ${total} imágenes...`
+          })
+        }
+      )
+
+      // Crear mapa de imágenes comprimidas
+      const compressedImagesMap = new Map<string, string>()
+      markedImages.forEach((img, index) => {
+        compressedImagesMap.set(img.url, compressedImages[index])
+      })
+
       // Convertir mapas a base64 para exportación
       toast({
         title: "Convirtiendo Mapas",
@@ -619,7 +649,7 @@ export default function InformesPage() {
             id: img.id,
             filename: img.filename,
             url: img.url,
-            urlWithBoxes: processedImagesMap.get(img.url) || img.url,
+            urlWithBoxes: compressedImagesMap.get(img.url) || processedImagesMap.get(img.url) || img.url,
             timestamp: img.timestamp || new Date().toLocaleString('es-ES'),
             gps,
             detections: getImageDetections(img.url),
@@ -821,7 +851,7 @@ export default function InformesPage() {
             id: img.id,
             filename: img.filename,
             url: img.url,
-            urlWithBoxes: processedImagesMap.get(img.url) || img.url,
+            urlWithBoxes: compressedImagesMap.get(img.url) || processedImagesMap.get(img.url) || img.url,
             timestamp: img.timestamp || new Date().toLocaleString('es-ES'),
             gps,
             detections: getImageDetections(img.url),
