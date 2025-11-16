@@ -97,7 +97,7 @@ export function SessionManager({
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle>
-            {mode === 'save' ? 'Guardar' : 'Cargar'} {type === 'analysis' ? 'Sesión de Análisis' : 'Borrador de Informe'}
+            {mode === 'save' ? 'Guardar' : 'Cargar'} {type === 'analysis' ? 'Sesión de Análisis' : 'Informe'}
           </DialogTitle>
           <DialogDescription>
             {mode === 'save'

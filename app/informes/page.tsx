@@ -16,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { FileText, Download, Eye, Sparkles, MapPin, Image as ImageIcon, Printer, Save, FolderOpen, Edit, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, AlignJustify, List, ListOrdered, Undo, Redo, Type, BookMarked, BookOpen } from "lucide-react"
+import { FileText, Download, Eye, Sparkles, MapPin, Image as ImageIcon, Printer, Save, FolderOpen, Edit, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, AlignJustify, List, ListOrdered, Undo, Redo, Type, BookMarked, BookOpen, FileCheck } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useAnalysisState } from "@/contexts/analysis-context"
 import { useToast } from "@/hooks/use-toast"
@@ -31,6 +31,7 @@ import { SessionManager } from "@/components/session-manager"
 import { saveReportDraft, loadReportDraft } from "@/lib/session-storage"
 import { GooglePlacesAutocomplete } from "@/components/google-places-autocomplete"
 import { exportLibraryToJSON, importLibraryFromJSON, reconstructLibraryFromFiles, loadImagesFromLibrary } from "@/lib/library-storage"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 // Interfaz para datos GPS
 interface GPSData {
@@ -1010,86 +1011,134 @@ export default function InformesPage() {
               {markedImages.length} {markedImages.length === 1 ? 'imagen seleccionada' : 'imágenes seleccionadas'}
             </p>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setSessionDialogMode('save')
-                setShowSessionDialog(true)
-              }}
-            >
-              <Save className="mr-2 h-4 w-4" />
-              Guardar Borrador
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setSessionDialogMode('load')
-                setShowSessionDialog(true)
-              }}
-            >
-              <FolderOpen className="mr-2 h-4 w-4" />
-              Cargar Borrador
-            </Button>
-            <div className="h-6 w-px bg-border mx-2" />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExportLibrary}
-              disabled={loadedImages.length === 0}
-              title="Guardar biblioteca de imágenes con rutas y selección"
-            >
-              <BookMarked className="mr-2 h-4 w-4" />
-              Guardar Biblioteca
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleImportLibrary}
-              title="Cargar biblioteca guardada previamente"
-            >
-              <BookOpen className="mr-2 h-4 w-4" />
-              Cargar Biblioteca
-            </Button>
-            <div className="h-6 w-px bg-border mx-2" />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={generateAllAnalyses}
-              disabled={generatingAI || markedImages.length === 0}
-            >
-              <Sparkles className="mr-2 h-4 w-4" />
-              {generatingAI ? "Generando..." : "Generar Análisis IA"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handlePrint}
-              disabled={markedImages.length === 0}
-            >
-              <Printer className="mr-2 h-4 w-4" />
-              Imprimir
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleOpenReportEditor}
-              disabled={generating || markedImages.length === 0}
-            >
-              <Edit className="mr-2 h-4 w-4" />
-              {generating ? "Generando..." : "Editar Informe"}
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleExportWord}
-              disabled={generating || markedImages.length === 0}
-            >
-              <Download className="mr-2 h-4 w-4" />
-              {generating ? "Generando..." : "Exportar a Word"}
-            </Button>
-          </div>
+          <TooltipProvider>
+            <div className="flex gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => {
+                      setSessionDialogMode('save')
+                      setShowSessionDialog(true)
+                    }}
+                  >
+                    <FileCheck className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Guardar Informe</p>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => {
+                      setSessionDialogMode('load')
+                      setShowSessionDialog(true)
+                    }}
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Cargar Informe Guardado</p>
+                </TooltipContent>
+              </Tooltip>
+              <div className="h-6 w-px bg-border mx-2" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleExportLibrary}
+                    disabled={loadedImages.length === 0}
+                  >
+                    <BookMarked className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Guardar Biblioteca de Imágenes</p>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleImportLibrary}
+                  >
+                    <BookOpen className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Cargar Biblioteca de Imágenes</p>
+                </TooltipContent>
+              </Tooltip>
+              <div className="h-6 w-px bg-border mx-2" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={generateAllAnalyses}
+                    disabled={generatingAI || markedImages.length === 0}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{generatingAI ? "Generando Análisis..." : "Generar Análisis con IA"}</p>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handlePrint}
+                    disabled={markedImages.length === 0}
+                  >
+                    <Printer className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Imprimir Informe</p>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleOpenReportEditor}
+                    disabled={generating || markedImages.length === 0}
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{generating ? "Generando..." : "Editar Informe"}</p>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon"
+                    onClick={handleExportWord}
+                    disabled={generating || markedImages.length === 0}
+                  >
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{generating ? "Generando..." : "Exportar a Word"}</p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </TooltipProvider>
         </div>
 
         <div className="p-8 space-y-6">
