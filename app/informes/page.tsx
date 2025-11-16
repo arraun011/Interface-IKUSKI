@@ -1893,12 +1893,12 @@ export default function InformesPage() {
             <AlertDialogTitle className="text-red-500">⚠️ Campos Obligatorios Incompletos</AlertDialogTitle>
             <AlertDialogDescription>
               Debes completar los siguientes campos obligatorios antes de generar el informe:
-              <ul className="mt-3 list-disc list-inside space-y-1">
-                {missingFields.map((field, index) => (
-                  <li key={index} className="text-red-600 font-medium">{field}</li>
-                ))}
-              </ul>
             </AlertDialogDescription>
+            <ul className="mt-3 list-disc list-inside space-y-1">
+              {missingFields.map((field, index) => (
+                <li key={index} className="text-red-600 font-medium">{field}</li>
+              ))}
+            </ul>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogAction onClick={() => {
@@ -1919,14 +1919,15 @@ export default function InformesPage() {
             <AlertDialogTitle className="text-yellow-600">⚠️ Análisis IA No Generados</AlertDialogTitle>
             <AlertDialogDescription>
               No se ha generado el análisis técnico automático para todas las imágenes.
-              <br /><br />
-              <strong>Opciones:</strong>
-              <ul className="mt-2 list-disc list-inside space-y-1">
+            </AlertDialogDescription>
+            <div className="mt-4">
+              <strong className="text-sm">Opciones:</strong>
+              <ul className="mt-2 list-disc list-inside space-y-1 text-sm text-muted-foreground">
                 <li>Generar los análisis automáticamente usando el botón "Generar Análisis IA"</li>
                 <li>Escribir manualmente el análisis técnico en cada imagen</li>
                 <li>Continuar sin análisis (no recomendado)</li>
               </ul>
-            </AlertDialogDescription>
+            </div>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => {
